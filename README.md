@@ -1,0 +1,149 @@
+# ReAsk
+
+**LLM Conversation Evaluation via Re-Ask Detection**
+
+Automatically detect bad LLM responses by analyzing user follow-up messages. If a user re-asks the same question or explicitly corrects the assistant, the previous response was probably wrong.
+
+## Core Idea
+
+| Method | Signal | Example |
+|--------|--------|---------|
+| **CCM** (Conversation Continuity Metric) | User re-asks similar question | "How do I sort?" → bad response → "Can you show me how to sort?" |
+| **RDM** (Response Dissatisfaction Metric) | User explicitly corrects | "I asked for Python, not JavaScript!" |
+| **LLM Judge** | Fallback evaluation | Used when no clear CCM/RDM signal |
+
+All detection is LLM-based. No hardcoded rules.
+
+## Installation
+
+```bash
+pip install -e .
+```
+
+Or just:
+
+```bash
+pip install openai numpy pydantic
+```
+
+## Quick Start
+
+```python
+from reask import ReAskDetector, Message
+
+detector = ReAskDetector()
+
+# Evaluate a single response
+result = detector.evaluate_response(
+    user_message=Message.user("How do I reverse a string in Python?"),
+    assistant_response=Message.assistant("Use a for loop to iterate backwards."),
+    follow_up=Message.user("Can you just show me how to reverse a string?")
+)
+
+print(result)
+# EvalResult(❌ BAD, ccm, conf=0.92)
+print(result.reason)
+# "User re-asked similar question: Both messages ask about reversing strings"
+```
+
+## How It Works
+
+### 1. RDM - Correction Detection (LLM)
+
+Uses an LLM to detect if the follow-up contains explicit corrections or complaints:
+
+```python
+# These signals are detected by LLM:
+"I asked you to do X not Y"
+"That's not what I wanted"
+"You missed the point"
+"Try again"
+"That's wrong"
+```
+
+### 2. CCM - Re-Ask Detection (Embedding + LLM)
+
+Two-stage detection for re-asked questions:
+
+1. **Embedding similarity** - Fast check if follow-up is similar to original (threshold: 0.75)
+2. **LLM confirmation** - If above threshold, confirms if it's actually the same question
+
+```python
+detector = ReAskDetector(
+    similarity_threshold=0.75,      # Embedding threshold
+    use_llm_confirmation=True,      # Confirm with LLM
+    use_llm_judge_fallback=True     # Use judge when no signal
+)
+```
+
+### 3. LLM Judge - Fallback
+
+When no CCM or RDM signal is detected, optionally fall back to full LLM evaluation.
+
+## Full Conversation Evaluation
+
+```python
+from reask import ReAskDetector, Message
+
+conversation = [
+    Message.user("What's the capital of France?"),
+    Message.assistant("The capital of France is Berlin."),
+    Message.user("That's wrong! What is the capital of France?"),
+    Message.assistant("Sorry, the capital of France is Paris."),
+    Message.user("Thanks! What about Germany?"),
+]
+
+detector = ReAskDetector()
+results = detector.evaluate_conversation(conversation)
+
+for idx, result in results:
+    print(f"Response {idx}: {result}")
+```
+
+## Configuration
+
+```python
+detector = ReAskDetector(
+    # OpenAI client (uses OPENAI_API_KEY env var by default)
+    client=None,
+    
+    # Models
+    embedding_model="text-embedding-3-small",
+    judge_model="gpt-4o-mini",
+    
+    # CCM settings
+    similarity_threshold=0.75,      # Lower = more sensitive
+    use_llm_confirmation=True,      # Two-stage CCM
+    
+    # Fallback
+    use_llm_judge_fallback=True     # Use LLM when no signal
+)
+```
+
+## API Reference
+
+### `EvalResult`
+
+```python
+@dataclass
+class EvalResult:
+    is_bad: bool              # Was the response bad?
+    detection_type: DetectionType  # CCM, RDM, LLM_JUDGE, or NONE
+    confidence: float         # 0.0 to 1.0
+    reason: str              # Human-readable explanation
+    details: dict            # Extra info (similarity scores, etc.)
+```
+
+### `DetectionType`
+
+```python
+class DetectionType(Enum):
+    CCM = "ccm"           # Re-asked question detected
+    RDM = "rdm"           # Explicit correction detected
+    LLM_JUDGE = "llm_judge"  # LLM evaluated as bad
+    NONE = "none"         # No issues detected
+```
+
+## License
+
+MIT
