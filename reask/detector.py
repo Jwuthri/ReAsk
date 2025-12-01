@@ -3,12 +3,27 @@ import os
 from typing import Optional
 from openai import OpenAI
 from dotenv import load_dotenv
+from rich.console import Console
 
 from .models import Message, EvalResult, DetectionType, Role
 from .embeddings import EmbeddingService
 from .judge import LLMJudge
 
+console = Console()
 load_dotenv()
+
+BANNER = """[cyan]
+ /$$$$$$$             /$$$$$$            /$$      
+| $$__  $$           /$$__  $$          | $$      
+| $$  \\ $$  /$$$$$$ | $$  \\ $$  /$$$$$$$| $$   /$$
+| $$$$$$$/ /$$__  $$| $$$$$$$$ /$$_____/| $$  /$$/
+| $$__  $$| $$$$$$$$| $$__  $$|  $$$$$$ | $$$$$$/ 
+| $$  \\ $$| $$_____/| $$  | $$ \\____  $$| $$_  $$ 
+| $$  | $$|  $$$$$$$| $$  | $$ /$$$$$$$/| $$ \\  $$
+|__/  |__/ \\_______/|__/  |__/|_______/ |__/  \\__/
+[/cyan]
+[dim]Detect bad LLM responses via re-ask detection[/dim]
+"""
 
 
 class ReAskDetector:
@@ -30,8 +45,11 @@ class ReAskDetector:
         rdm_model: str = "gpt-5-nano",
         similarity_threshold: float = 0.5,
         use_llm_confirmation: bool = True,
-        use_llm_judge_fallback: bool = True
+        use_llm_judge_fallback: bool = True,
+        
     ):
+        console.print(BANNER)
+        console.print()
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.embeddings = EmbeddingService(self.client, embedding_model)
         self.judge = LLMJudge(
@@ -196,14 +214,11 @@ class ReAskDetector:
             List of (index, EvalResult) for each assistant response
         """
         results = []
-        
         i = 0
         while i < len(messages):
             msg = messages[i]
-            
             if msg.role == Role.USER and i + 1 < len(messages):
                 next_msg = messages[i + 1]
-                
                 if next_msg.role == Role.ASSISTANT:
                     follow_up = None
                     if i + 2 < len(messages) and messages[i + 2].role == Role.USER:
@@ -211,10 +226,8 @@ class ReAskDetector:
                     
                     result = self.evaluate_response(msg, next_msg, follow_up)
                     results.append((i + 1, result))
-                    
                     i += 2
                     continue
-            
             i += 1
         
         return results

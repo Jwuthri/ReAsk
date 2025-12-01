@@ -13,7 +13,6 @@ from rich.text import Text
 
 from reask import ReAskDetector, Message, DetectionType
 
-
 console = Console()
 
 
@@ -95,14 +94,6 @@ def run_example(detector, title: str, user_msg: str, assistant_msg: str, follow_
 
 
 def main():
-    console.print()
-    console.print(Panel.fit(
-        "[bold cyan]ReAsk[/bold cyan] - LLM Conversation Evaluation\n"
-        "[dim]Detect bad responses via re-ask detection[/dim]",
-        border_style="cyan"
-    ))
-    console.print()
-    
     # Config display
     config_table = Table(title="⚙️  Configuration", box=box.SIMPLE)
     config_table.add_column("Setting", style="cyan")
@@ -126,7 +117,7 @@ def main():
             use_llm_confirmation=True,
             use_llm_judge_fallback=True
         )
-    
+
     console.print("[green]✓[/green] Detector initialized\n")
     
     # Run examples
