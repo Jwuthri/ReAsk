@@ -1,0 +1,127 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# C extensions
+*.so
+*.html
+!docs/_build/html/**/*.html
+!docs/_build/html/**/*.css
+!docs/_build/html/**/*.js
+!docs/_build/html/**/*.png
+!docs/_build/html/**/*.svg
+# Distribution / packaging
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+output_file.jsonl
+
+# PyInstaller
+*.manifest
+*.spec
+!.aws
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+
+# # Sphinx documentation
+# docs/_build/
+
+# PyBuilder
+target/
+
+# DotEnv configuration
+.env
+.env.copy
+
+# Database
+*.db
+*.rdb
+training_data/
+dolly_*
+# Pycharm
+.idea
+
+# VS Code
+.vscode/
+
+# Spyder
+.spyproject/
+
+.pypirc
+
+# Jupyter NB Checkpoints
+.ipynb_checkpoints/
+*.ipynb
+
+# exclude data from source control by default
+data/**/*
+# But allow data/raw/*.json files
+!data/raw/
+!data/raw/*.json
+
+# Mac OS-specific storage files
+.DS_Store
+
+# vim
+*.swp
+*.swo
+
+# Mypy cache
+.mypy_cache/
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Nvidia
+.nv/
+.fastai/
+
+# spacy
+*.spacy
+
+# notebook
+*.csv
+*.json
+*.pkl
+*.joblib
+.python-version
+# terraform/*

@@ -1,0 +1,12 @@
+README.md
+pyproject.toml
+reask/__init__.py
+reask/detector.py
+reask/embeddings.py
+reask/judge.py
+reask/models.py
+reask.egg-info/PKG-INFO
+reask.egg-info/SOURCES.txt
+reask.egg-info/dependency_links.txt
+reask.egg-info/requires.txt
+reask.egg-info/top_level.txt
