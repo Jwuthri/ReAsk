@@ -79,29 +79,36 @@ class ReAskDetector:
         Returns:
             EvalResult with detection type and confidence
         """
+        # Step 1: Check for explicit corrections (RDM) - highest priority
+        # If user explicitly says "that's wrong", it's the clearest signal
+        if follow_up is not None:
+            rdm_result = self._check_rdm(follow_up)
+            if rdm_result.is_bad:
+                return rdm_result
+        
+        # Step 2: Check for re-asked questions (CCM)
+        if follow_up is not None:
+            ccm_result = self._check_ccm(user_message, follow_up)
+            if ccm_result.is_bad:
+                return ccm_result
+        
+        # Step 3: Check for hallucination if knowledge is provided
+        if user_message.knowledge:
+            hallucination_result = self._check_hallucination(assistant_response, user_message.knowledge)
+            if hallucination_result.is_bad:
+                return hallucination_result
+        
+        # Step 4: Fallback to LLM judge
+        if self.use_llm_judge_fallback:
+            return self._evaluate_with_judge(user_message, assistant_response, follow_up, user_message.knowledge)
+        
         if follow_up is None:
-            if self.use_llm_judge_fallback:
-                return self._evaluate_with_judge(user_message, assistant_response, None)
             return EvalResult(
                 is_bad=False,
                 detection_type=DetectionType.NONE,
                 confidence=0.0,
                 reason="No follow-up message to analyze"
             )
-        
-        # Step 1: Check for explicit corrections (RDM)
-        rdm_result = self._check_rdm(follow_up)
-        if rdm_result.is_bad:
-            return rdm_result
-        
-        # Step 2: Check for re-asked questions (CCM)
-        ccm_result = self._check_ccm(user_message, follow_up)
-        if ccm_result.is_bad:
-            return ccm_result
-        
-        # Step 3: Fallback to LLM judge
-        if self.use_llm_judge_fallback:
-            return self._evaluate_with_judge(user_message, assistant_response, follow_up)
         
         return EvalResult(
             is_bad=False,
@@ -136,6 +143,7 @@ class ReAskDetector:
             user_message.content,
             follow_up.content
         )
+        console.print(f"CCM similarity: {similarity}")
         
         if similarity < self.similarity_threshold:
             return EvalResult(
@@ -183,14 +191,34 @@ class ReAskDetector:
             details={"similarity": similarity}
         )
     
+    def _check_hallucination(self, assistant_response: Message, knowledge: str) -> EvalResult:
+        """Check if the response contradicts provided knowledge (hallucination detection)"""
+        result = self.judge.evaluate_hallucination(assistant_response, knowledge)
+        
+        if result["is_hallucination"]:
+            return EvalResult(
+                is_bad=True,
+                detection_type=DetectionType.HALLUCINATION,
+                confidence=result["confidence"],
+                reason=result["reason"],
+                details={"hallucination_result": result}
+            )
+        
+        return EvalResult(
+            is_bad=False,
+            detection_type=DetectionType.HALLUCINATION,
+            confidence=0.0
+        )
+    
     def _evaluate_with_judge(
         self,
         user_message: Message,
         assistant_response: Message,
-        follow_up: Optional[Message]
+        follow_up: Optional[Message],
+        knowledge: Optional[str] = None
     ) -> EvalResult:
         """Fallback to LLM judge evaluation"""
-        result = self.judge.evaluate(user_message, assistant_response, follow_up)
+        result = self.judge.evaluate(user_message, assistant_response, follow_up, knowledge)
         
         return EvalResult(
             is_bad=result["is_bad"],

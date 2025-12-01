@@ -27,16 +27,25 @@ def parse_csv(content: str) -> dict:
         missing = required_cols - set(reader.fieldnames or [])
         raise ValueError(f"Missing required columns: {missing}")
     
+    has_knowledge = 'knowledge' in (reader.fieldnames or [])
+    
     conversations = {}
     for row in reader:
         conv_id = row['conversation_id']
         if conv_id not in conversations:
             conversations[conv_id] = []
-        conversations[conv_id].append({
+        
+        msg = {
             'index': int(row['message_index']),
             'role': row['role'].lower(),
             'content': row['content']
-        })
+        }
+        
+        # Capture knowledge field if present and non-empty
+        if has_knowledge and row.get('knowledge', '').strip():
+            msg['knowledge'] = row['knowledge'].strip()
+        
+        conversations[conv_id].append(msg)
     
     # Sort messages by index
     for conv_id in conversations:
@@ -59,11 +68,18 @@ def parse_json(content: str) -> dict:
         for i, msg in enumerate(conv.get('messages', [])):
             if 'role' not in msg or 'content' not in msg:
                 raise ValueError(f"Message missing 'role' or 'content' in conversation {conv_id}")
-            messages.append({
+            
+            parsed_msg = {
                 'index': i,
                 'role': msg['role'].lower(),
                 'content': msg['content']
-            })
+            }
+            
+            # Capture knowledge field if present
+            if msg.get('knowledge', '').strip():
+                parsed_msg['knowledge'] = msg['knowledge'].strip()
+            
+            messages.append(parsed_msg)
         conversations[conv_id] = messages
     
     return conversations
@@ -123,7 +139,8 @@ async def upload_dataset(
                 conversation_id=conv.id,
                 index=msg['index'],
                 role=msg['role'],
-                content=msg['content']
+                content=msg['content'],
+                knowledge=msg.get('knowledge')
             )
             db.add(db_msg)
             total_messages += 1
@@ -201,6 +218,7 @@ async def get_dataset(dataset_id: int, db: Session = Depends(get_db)):
                 index=msg.index,
                 role=msg.role,
                 content=msg.content,
+                knowledge=msg.knowledge,
                 eval_result=eval_result
             ))
         
@@ -224,6 +242,7 @@ async def get_dataset(dataset_id: int, db: Session = Depends(get_db)):
             ccm = sum(1 for r in eval_results if r.detection_type == 'ccm')
             rdm = sum(1 for r in eval_results if r.detection_type == 'rdm')
             llm = sum(1 for r in eval_results if r.detection_type == 'llm_judge')
+            hallucination = sum(1 for r in eval_results if r.detection_type == 'hallucination')
             avg_conf = sum(r.confidence for r in eval_results) / total if total > 0 else 0
             
             stats = EvalStats(
@@ -233,6 +252,7 @@ async def get_dataset(dataset_id: int, db: Session = Depends(get_db)):
                 ccm_detections=ccm,
                 rdm_detections=rdm,
                 llm_judge_detections=llm,
+                hallucination_detections=hallucination,
                 avg_confidence=avg_conf
             )
     

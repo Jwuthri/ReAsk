@@ -12,7 +12,7 @@
   CCM Model              gpt-5-nano  
   RDM Model              gpt-5-nano  
   Judge Model            gpt-5-mini  
-  Similarity Threshold   0.75        
+  Similarity Threshold   0.66  
                                      
 
 ✓ Detector initialized

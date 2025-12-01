@@ -407,6 +407,31 @@
   word-break: break-word;
 }
 
+.knowledgeBox {
+  margin-top: 12px;
+  padding: 12px;
+  background: rgba(0, 245, 255, 0.05);
+  border: 1px solid rgba(0, 245, 255, 0.2);
+  border-radius: var(--radius-sm);
+}
+
+.knowledgeLabel {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent-cyan);
+  margin-bottom: 8px;
+}
+
+.knowledgeContent {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}
+
 .evalReason {
   margin-top: 12px;
   padding: 12px;

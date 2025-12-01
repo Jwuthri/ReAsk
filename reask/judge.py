@@ -29,6 +29,23 @@ class CorrectionResult(BaseModel):
     reason: str = Field(description="Brief explanation under 20 words")
 
 
+class HallucinationResult(BaseModel):
+    """Structured output for hallucination detection"""
+    is_hallucination: bool = Field(description="Whether the response contains information that contradicts or is not supported by the provided knowledge")
+    confidence: float = Field(ge=0.0, le=1.0, description="Confidence score from 0.0 to 1.0")
+    reason: str = Field(description="Brief explanation under 20 words")
+
+
+class FollowUpAnalysisResult(BaseModel):
+    """Combined structured output for RDM + CCM detection in one call"""
+    is_correction: bool = Field(description="Whether the user is correcting/complaining about the previous response (RDM)")
+    correction_confidence: float = Field(ge=0.0, le=1.0, description="Confidence for correction detection")
+    correction_reason: str = Field(description="Brief explanation for correction detection under 20 words")
+    is_reask: bool = Field(description="Whether the user is re-asking the same question (CCM)")
+    reask_confidence: float = Field(ge=0.0, le=1.0, description="Confidence for re-ask detection")
+    reask_reason: str = Field(description="Brief explanation for re-ask detection under 20 words")
+
+
 def _make_strict_schema(model: type[BaseModel]) -> dict:
     """Convert a Pydantic model to a strict OpenAI-compatible JSON schema."""
     schema = model.model_json_schema()
@@ -68,7 +85,8 @@ class LLMJudge:
         self,
         user_message: Message,
         assistant_response: Message,
-        follow_up: Optional[Message] = None
+        follow_up: Optional[Message] = None,
+        knowledge: Optional[str] = None
     ) -> dict:
         """
         Evaluate if assistant response was good.
@@ -77,6 +95,7 @@ class LLMJudge:
             user_message: The original user question/request
             assistant_response: The assistant's response to evaluate
             follow_up: Optional follow-up from user (provides context)
+            knowledge: Optional ground truth/context to evaluate against
         
         Returns:
             dict with is_bad, confidence, reason
@@ -90,6 +109,17 @@ USER MESSAGE:
 
 ASSISTANT RESPONSE:
 {assistant_response.content}"""
+
+        if knowledge:
+            eval_prompt += f"""
+
+KNOWLEDGE CONTEXT (ground truth available to the assistant):
+{knowledge}
+
+Note: The assistant had access to this knowledge. The response does NOT need to include all information - only evaluate if:
+1. The information provided is ACCURATE (matches the knowledge)
+2. The response adequately answers the user's question
+Do NOT penalize for omitting details that weren't specifically asked for."""
 
         if follow_up:
             eval_prompt += f"""
@@ -232,6 +262,67 @@ MESSAGE:
         except Exception as e:
             return {
                 "is_correction": False,
+                "confidence": 0.0,
+                "reason": f"Error: {str(e)}"
+            }
+    
+    def evaluate_hallucination(
+        self,
+        assistant_response: Message,
+        knowledge: str
+    ) -> dict:
+        """
+        Evaluate if an assistant response contradicts or hallucinates beyond the provided knowledge.
+        
+        Args:
+            assistant_response: The assistant's response to evaluate
+            knowledge: Ground truth/context to check against
+        
+        Returns:
+            dict with is_hallucination, confidence, reason
+        """
+        prompt = f"""You are a fact-checker. Evaluate if the assistant's response contains hallucinations.
+
+A hallucination is when the response:
+- States facts that contradict the provided knowledge
+- Makes up information not supported by the knowledge
+- Provides incorrect details that differ from the source
+
+IMPORTANT: The response can include additional helpful context or explanations - that's fine.
+Only flag as hallucination if the response contains INCORRECT or CONTRADICTORY information.
+
+KNOWLEDGE (Ground Truth):
+{knowledge}
+
+ASSISTANT RESPONSE:
+{assistant_response.content}
+
+Does the response contain hallucinations (incorrect/contradictory information)?"""
+
+        try:
+            response = self.client.responses.create(
+                model=self.judge_model,
+                input=prompt,
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": "hallucination_result",
+                        "strict": True,
+                        "schema": _make_strict_schema(HallucinationResult)
+                    }
+                }
+            )
+            
+            result = HallucinationResult.model_validate_json(response.output_text)
+            return {
+                "is_hallucination": result.is_hallucination,
+                "confidence": result.confidence,
+                "reason": result.reason
+            }
+            
+        except Exception as e:
+            return {
+                "is_hallucination": False,
                 "confidence": 0.0,
                 "reason": f"Error: {str(e)}"
             }

@@ -65,12 +65,12 @@ Uses an LLM to detect if the follow-up contains explicit corrections or complain
 
 Two-stage detection for re-asked questions:
 
-1. **Embedding similarity** - Fast check if follow-up is similar to original (threshold: 0.75)
+1. **Embedding similarity** - Fast check if follow-up is similar to original (threshold: 0.66)
 2. **LLM confirmation** - If above threshold, confirms if it's actually the same question
 
 ```python
 detector = ReAskDetector(
-    similarity_threshold=0.75,      # Embedding threshold
+    similarity_threshold=0.66,      # Embedding threshold
     use_llm_confirmation=True,      # Confirm with LLM
     use_llm_judge_fallback=True     # Use judge when no signal
 )
@@ -112,7 +112,7 @@ detector = ReAskDetector(
     judge_model="gpt-4o-mini",
     
     # CCM settings
-    similarity_threshold=0.75,      # Lower = more sensitive
+    similarity_threshold=0.66,      # Lower = more sensitive
     use_llm_confirmation=True,      # Two-stage CCM
     
     # Fallback

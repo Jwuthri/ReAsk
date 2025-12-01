@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 class MessageBase(BaseModel):
     role: str
     content: str
+    knowledge: Optional[str] = None
 
 
 class MessageCreate(MessageBase):
@@ -18,6 +19,7 @@ class MessageCreate(MessageBase):
 class MessageResponse(MessageBase):
     id: int
     index: int
+    knowledge: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -94,6 +96,7 @@ class EvalStats(BaseModel):
     ccm_detections: int
     rdm_detections: int
     llm_judge_detections: int
+    hallucination_detections: int
     avg_confidence: float
 
 

@@ -5,7 +5,13 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import styles from './page.module.css';
 import Header from '@/components/Header';
-import { DatasetWithStats, fetchDataset, evaluateDataset, deleteDataset } from '@/lib/api';
+import { 
+  DatasetWithStats, 
+  fetchDataset, 
+  deleteDataset,
+  evaluateDatasetStream,
+  EvalStreamEvent 
+} from '@/lib/api';
 
 export default function DatasetDetail() {
   const params = useParams();
@@ -15,6 +21,7 @@ export default function DatasetDetail() {
   const [dataset, setDataset] = useState<DatasetWithStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [evaluating, setEvaluating] = useState(false);
+  const [evalProgress, setEvalProgress] = useState<{ current: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedConvs, setExpandedConvs] = useState<Set<number>>(new Set());
 
@@ -36,14 +43,72 @@ export default function DatasetDetail() {
 
   const handleEvaluate = async () => {
     setEvaluating(true);
-    try {
-      await evaluateDataset(id);
-      await loadDataset();
-    } catch (err) {
-      alert('Evaluation failed. Check API server.');
-    } finally {
-      setEvaluating(false);
-    }
+    setEvalProgress(null);
+    
+    const cleanup = evaluateDatasetStream(
+      id,
+      (event: EvalStreamEvent) => {
+        if (event.type === 'start') {
+          setEvalProgress({ current: 0, total: event.total });
+        } else if (event.type === 'progress') {
+          setEvalProgress({ current: event.current, total: event.total });
+          
+          // Update dataset with new eval results in real-time
+          setDataset((prev) => {
+            if (!prev) return prev;
+            
+            const updatedConversations = prev.conversations.map((conv) => {
+              if (conv.id === event.conversation_db_id) {
+                const updatedMessages = conv.messages.map((msg) => {
+                  const result = event.results.find((r) => r.message_id === msg.id);
+                  if (result) {
+                    return {
+                      ...msg,
+                      eval_result: {
+                        id: 0,
+                        message_id: msg.id,
+                        is_bad: result.is_bad,
+                        detection_type: result.detection_type,
+                        confidence: result.confidence,
+                        reason: result.reason,
+                      },
+                    };
+                  }
+                  return msg;
+                });
+                return { ...conv, messages: updatedMessages };
+              }
+              return conv;
+            });
+            
+            return { ...prev, conversations: updatedConversations };
+          });
+        } else if (event.type === 'complete') {
+          // Update stats and mark as evaluated
+          setDataset((prev) => {
+            if (!prev) return prev;
+            return { 
+              ...prev, 
+              evaluated: true, 
+              stats: event.stats || prev.stats 
+            };
+          });
+          setEvaluating(false);
+          setEvalProgress(null);
+        } else if (event.type === 'error') {
+          alert(`Evaluation failed: ${event.message}`);
+          setEvaluating(false);
+          setEvalProgress(null);
+        }
+      },
+      (error) => {
+        alert('Evaluation failed. Check API server.');
+        setEvaluating(false);
+        setEvalProgress(null);
+      }
+    );
+    
+    // Cleanup will be called when evaluation completes or errors
   };
 
   const handleDelete = async () => {
@@ -142,7 +207,10 @@ export default function DatasetDetail() {
                   {evaluating ? (
                     <>
                       <span className={styles.btnSpinner} />
-                      Evaluating...
+                      {evalProgress 
+                        ? `Evaluating ${evalProgress.current}/${evalProgress.total}...`
+                        : 'Starting...'
+                      }
                     </>
                   ) : (
                     <>⚡ Run Evaluation</>
@@ -243,6 +311,21 @@ export default function DatasetDetail() {
                     />
                   </div>
                 </div>
+                <div className={styles.detectionItem}>
+                  <div className={styles.detectionHeader}>
+                    <span className="badge badge-danger">Hallucination</span>
+                    <span>{dataset.stats.hallucination_detections}</span>
+                  </div>
+                  <div className={styles.detectionBar}>
+                    <div
+                      className={styles.detectionFill}
+                      style={{
+                        width: `${(dataset.stats.hallucination_detections / Math.max(dataset.stats.total_responses, 1)) * 100}%`,
+                        background: 'var(--accent-red)',
+                      }}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -304,6 +387,7 @@ export default function DatasetDetail() {
                                   <span className={`badge ${
                                     msg.eval_result.detection_type === 'ccm' ? 'badge-info' :
                                     msg.eval_result.detection_type === 'rdm' ? 'badge-purple' :
+                                    msg.eval_result.detection_type === 'hallucination' ? 'badge-danger' :
                                     'badge-warning'
                                   }`}>
                                     {msg.eval_result.detection_type.toUpperCase()}
@@ -317,6 +401,12 @@ export default function DatasetDetail() {
                             <div className={styles.messageContent}>
                               {msg.content}
                             </div>
+                            {msg.knowledge && (
+                              <div className={styles.knowledgeBox}>
+                                <span className={styles.knowledgeLabel}>📚 Knowledge Context</span>
+                                <div className={styles.knowledgeContent}>{msg.knowledge}</div>
+                              </div>
+                            )}
                             {msg.eval_result?.reason && (
                               <div className={styles.evalReason}>
                                 💬 {msg.eval_result.reason}

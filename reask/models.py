@@ -16,6 +16,7 @@ class DetectionType(str, Enum):
     CCM = "ccm"  # Conversation Continuity Metric - user re-asked similar question
     RDM = "rdm"  # Response Dissatisfaction Metric - explicit correction detected
     LLM_JUDGE = "llm_judge"  # LLM evaluated the response as bad
+    HALLUCINATION = "hallucination"  # Response contradicts provided knowledge
     NONE = "none"  # No issues detected
 
 
@@ -24,10 +25,11 @@ class Message:
     """A single message in a conversation"""
     role: Role
     content: str
+    knowledge: Optional[str] = None  # Ground truth/context for hallucination detection
     
     @classmethod
-    def user(cls, content: str) -> "Message":
-        return cls(Role.USER, content)
+    def user(cls, content: str, knowledge: Optional[str] = None) -> "Message":
+        return cls(Role.USER, content, knowledge)
     
     @classmethod
     def assistant(cls, content: str) -> "Message":

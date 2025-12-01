@@ -25,6 +25,7 @@ def get_detection_color(detection_type: DetectionType) -> str:
         DetectionType.CCM: "cyan",
         DetectionType.RDM: "magenta", 
         DetectionType.LLM_JUDGE: "yellow",
+        DetectionType.HALLUCINATION: "red",
         DetectionType.NONE: "green"
     }
     return colors.get(detection_type, "white")
@@ -102,7 +103,7 @@ def main():
     config_table.add_row("CCM Model", "gpt-5-nano")
     config_table.add_row("RDM Model", "gpt-5-nano")
     config_table.add_row("Judge Model", "gpt-5-mini")
-    config_table.add_row("Similarity Threshold", "0.75")
+    config_table.add_row("Similarity Threshold", "0.66")
     
     console.print(config_table)
     console.print()
@@ -113,7 +114,7 @@ def main():
             ccm_model="gpt-5-nano",
             rdm_model="gpt-5-nano",
             judge_model="gpt-5-mini",
-            similarity_threshold=0.75,
+            similarity_threshold=0.66,
             use_llm_confirmation=True,
             use_llm_judge_fallback=True
         )
@@ -147,9 +148,64 @@ def main():
         "Great! Now how do I check if it's a palindrome?"
     ))
     
+    # Example 4: Hallucination Detection with Knowledge
+    console.print()
+    console.rule("[bold blue]Example 4: Hallucination Detection (with Knowledge)[/bold blue]")
+    console.print()
+    
+    knowledge = """
+    Company: Acme Corp
+    Founded: 2015
+    CEO: Jane Smith
+    Headquarters: San Francisco, CA
+    Employees: 500
+    Revenue: $50 million (2024)
+    """
+    
+    # Show the knowledge context
+    console.print(Panel(knowledge.strip(), title="📚 Knowledge Context", border_style="blue"))
+    console.print()
+    
+    # Test case: Hallucinated response
+    table = Table(show_header=True, header_style="bold", box=box.ROUNDED)
+    table.add_column("Role", style="cyan", width=12)
+    table.add_column("Message", style="white")
+    table.add_row("👤 User", "Tell me about Acme Corp")
+    table.add_row("🤖 Assistant", "Acme Corp was founded in 2010 by John Doe. They are headquartered in New York and have 2000 employees.")
+    console.print(table)
+    console.print()
+    
+    with console.status("[bold green]Checking for hallucinations...", spinner="dots"):
+        hallucination_result = detector.evaluate_response(
+            user_message=Message.user("Tell me about Acme Corp", knowledge=knowledge),
+            assistant_response=Message.assistant("Acme Corp was founded in 2010 by John Doe. They are headquartered in New York and have 2000 employees.")
+        )
+    
+    display_result(hallucination_result, "Hallucination Check (BAD - Wrong Facts)")
+    results.append(hallucination_result)
+    
+    # Test case: Accurate response
+    console.print()
+    table2 = Table(show_header=True, header_style="bold", box=box.ROUNDED)
+    table2.add_column("Role", style="cyan", width=12)
+    table2.add_column("Message", style="white")
+    table2.add_row("👤 User", "Tell me about Acme Corp")
+    table2.add_row("🤖 Assistant", "Acme Corp was founded in 2015 and is led by CEO Jane Smith. They're based in San Francisco with around 500 employees.")
+    console.print(table2)
+    console.print()
+    
+    with console.status("[bold green]Checking for hallucinations...", spinner="dots"):
+        accurate_result = detector.evaluate_response(
+            user_message=Message.user("Tell me about Acme Corp", knowledge=knowledge),
+            assistant_response=Message.assistant("Acme Corp was founded in 2015 and is led by CEO Jane Smith. They're based in San Francisco with around 500 employees.")
+        )
+    
+    display_result(accurate_result, "Hallucination Check (GOOD - Accurate)")
+    results.append(accurate_result)
+    
     # Full conversation evaluation
     console.print()
-    console.rule("[bold blue]Example 4: Full Conversation Evaluation[/bold blue]")
+    console.rule("[bold blue]Example 5: Full Conversation Evaluation[/bold blue]")
     console.print()
     
     conversation = [

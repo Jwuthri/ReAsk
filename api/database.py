@@ -44,6 +44,7 @@ class Message(Base):
     index = Column(Integer, nullable=False)  # Order in conversation
     role = Column(String(20), nullable=False)  # user or assistant
     content = Column(Text, nullable=False)
+    knowledge = Column(Text, nullable=True)  # Optional knowledge/context for RAG evaluation
     
     conversation = relationship("Conversation", back_populates="messages")
     eval_result = relationship("EvalResult", back_populates="message", uselist=False, cascade="all, delete-orphan")
