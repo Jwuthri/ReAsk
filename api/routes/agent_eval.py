@@ -1478,6 +1478,19 @@ def run_background_analysis(analysis_id: int, resume_from: int = 0):
         
         # Rebuild trace for internal analyzers
         turns = db_trace.turns
+        
+        # DEBUG: Log what we're rebuilding
+        total_db_steps = 0
+        tool_call_steps = 0
+        for t in turns:
+            for interaction in t.interactions:
+                for s in interaction.steps:
+                    total_db_steps += 1
+                    if s.step_type == 'tool_call' and s.tool_name:
+                        tool_call_steps += 1
+                        console.print(f"    [dim]DB tool call: {s.tool_name}[/]")
+        console.print(f"  [dim]DB steps: {total_db_steps}, tool calls: {tool_call_steps}[/]")
+        
         trace_input = AgentTraceInput(
             initial_task=db_trace.initial_task,
             turns=[
@@ -1492,6 +1505,7 @@ def run_background_analysis(analysis_id: int, resume_from: int = 0):
                                 tool_name=s.tool_name,
                                 parameters=json.loads(s.tool_parameters_json) if s.tool_parameters_json else {},
                                 result=s.tool_result,
+                                error=s.tool_error,
                             ) if s.step_type == 'tool_call' and s.tool_name else None,
                         )
                         for interaction in t.interactions
@@ -1504,6 +1518,7 @@ def run_background_analysis(analysis_id: int, resume_from: int = 0):
             total_cost=db_trace.total_cost,
         )
         trace = convert_to_agent_trace(trace_input)
+        console.print(f"  [dim]Rebuilt trace: {trace.step_count} steps, {len(trace.tool_calls)} tool calls[/]")
         
         results = {}
         
@@ -1776,7 +1791,7 @@ class StartJobRequest(BaseModel):
                             action=s.action,
                             observation=s.observation,
                             tool_call=s.tool_call
-                        ) for s in interaction.steps
+                        ) for s in (interaction.agent_steps or [])
                     ]
                     turns.append(AgentTurnInput(
                         user_message=turn.user_message,
