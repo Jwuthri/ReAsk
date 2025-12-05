@@ -37,6 +37,30 @@
   color: var(--text-secondary);
 }
 
+.heroActions {
+  margin-top: 24px;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+.heroBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.heroBtnBadge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 5px;
+  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+  color: white;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 .uploadSection {
   max-width: 700px;
   margin: 0 auto 64px;

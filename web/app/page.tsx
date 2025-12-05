@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import styles from './page.module.css';
 import Header from '@/components/Header';
 import FileUpload from '@/components/FileUpload';
@@ -56,6 +57,12 @@ export default function Home() {
               Upload conversation datasets and detect bad responses through re-ask pattern analysis.
               Powered by CCM, RDM, and LLM Judge detection methods.
             </p>
+            <div className={styles.heroActions}>
+              <Link href="/agent" className={`btn btn-secondary ${styles.heroBtn}`}>
+                🤖 Try Agent Analysis
+                <span className={styles.heroBtnBadge}>NEW</span>
+              </Link>
+            </div>
           </section>
 
           <section className={styles.uploadSection}>

@@ -63,6 +63,92 @@ class EvalResult(Base):
     message = relationship("Message", back_populates="eval_result")
 
 
+# ============================================
+# Agent Trace Models (Turn-based)
+# ============================================
+
+class AgentTraceDB(Base):
+    __tablename__ = "agent_traces"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=True)  # Optional name for the trace
+    initial_task = Column(Text, nullable=True)  # Optional initial task description
+    success = Column(Boolean, nullable=True)
+    total_cost = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Analysis results (stored as JSON strings)
+    overall_score = Column(Float, nullable=True)
+    analysis_types = Column(Text, nullable=True)  # JSON array of types run
+    
+    # Individual results as JSON
+    conversation_result = Column(Text, nullable=True)
+    trajectory_result = Column(Text, nullable=True)
+    tools_result = Column(Text, nullable=True)
+    self_correction_result = Column(Text, nullable=True)
+    intent_drift_result = Column(Text, nullable=True)
+    
+    turns = relationship("AgentTurnDB", back_populates="trace", cascade="all, delete-orphan", order_by="AgentTurnDB.index")
+
+
+class AgentTurnDB(Base):
+    """A turn in the conversation: user message -> agent steps -> agent response"""
+    __tablename__ = "agent_turns"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    trace_id = Column(Integer, ForeignKey("agent_traces.id", ondelete="CASCADE"), nullable=False)
+    index = Column(Integer, nullable=False)
+    user_message = Column(Text, nullable=False)
+    agent_response = Column(Text, nullable=False)
+    
+    trace = relationship("AgentTraceDB", back_populates="turns")
+    steps = relationship("AgentStepDB", back_populates="turn", cascade="all, delete-orphan", order_by="AgentStepDB.index")
+
+
+class AgentStepDB(Base):
+    __tablename__ = "agent_steps"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    turn_id = Column(Integer, ForeignKey("agent_turns.id", ondelete="CASCADE"), nullable=False)
+    index = Column(Integer, nullable=False)
+    thought = Column(Text, nullable=True)
+    action = Column(Text, nullable=True)
+    observation = Column(Text, nullable=True)
+    
+    # Tool call stored as JSON
+    tool_call_json = Column(Text, nullable=True)
+    
+    turn = relationship("AgentTurnDB", back_populates="steps")
+
+
+class AnalysisJobDB(Base):
+    """Background analysis job tracking"""
+    __tablename__ = "analysis_jobs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    status = Column(String(20), nullable=False, default="pending")  # pending, running, completed, failed
+    created_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    
+    # Input data (stored as JSON)
+    trace_json = Column(Text, nullable=False)
+    analysis_types_json = Column(Text, nullable=False)
+    
+    # Progress tracking
+    current_step = Column(Integer, default=0)
+    total_steps = Column(Integer, default=0)
+    current_analysis = Column(String(50), nullable=True)
+    progress_details_json = Column(Text, nullable=True)  # Turn-by-turn results as they come in
+    
+    # Result (stored as JSON when complete)
+    result_json = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)
+    
+    # Link to saved trace (set when job completes and saves)
+    saved_trace_id = Column(Integer, ForeignKey("agent_traces.id", ondelete="SET NULL"), nullable=True)
+
+
 def init_db():
     """Create all tables"""
     Base.metadata.create_all(bind=engine)

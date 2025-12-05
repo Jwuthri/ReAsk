@@ -266,6 +266,92 @@ MESSAGE:
                 "reason": f"Error: {str(e)}"
             }
     
+    def analyze_follow_up(
+        self,
+        original_question: str,
+        follow_up: str,
+        similarity_score: float
+    ) -> dict:
+        """
+        Combined RDM + CCM detection in a single LLM call.
+        
+        Analyzes a follow-up message to detect:
+        1. RDM: Is the user correcting/complaining about the previous response?
+        2. CCM: Is the user re-asking the same question?
+        
+        Args:
+            original_question: The original user message
+            follow_up: The follow-up user message
+            similarity_score: Embedding similarity between the two messages
+        
+        Returns:
+            dict with correction and reask detection results
+        """
+        prompt = f"""Analyze this follow-up message to detect two things:
+
+1. CORRECTION/COMPLAINT (RDM): Is the user explicitly correcting, complaining about, or expressing dissatisfaction with the previous AI response?
+   Look for signals like:
+   - "That's not what I asked"
+   - "I said X not Y"
+   - "You missed the point"
+   - "Try again"
+   - "That's wrong"
+   - Any explicit frustration or correction
+
+2. RE-ASKING (CCM): Is the user re-asking essentially the same question as before?
+   Examples of RE-ASKING:
+   - "How do I sort a list?" → "Can you show me how to sort a list?"
+   - "What's the capital of France?" → "You didn't answer - what is France's capital?"
+   
+   Examples of DIFFERENT (not re-asking):
+   - "How do I sort a list?" → "Now how do I filter it?"
+   - "What's the capital of France?" → "What about Germany?"
+   - "Write a sort function" → "Great, now add error handling"
+
+ORIGINAL MESSAGE:
+{original_question}
+
+FOLLOW-UP MESSAGE:
+{follow_up}
+
+EMBEDDING SIMILARITY: {similarity_score:.2f}
+
+Analyze both aspects independently - a message could be both a correction AND a re-ask, or neither."""
+
+        try:
+            response = self.client.responses.create(
+                model=self.ccm_model,  # Use the faster model for this combined check
+                input=prompt,
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": "follow_up_analysis",
+                        "strict": True,
+                        "schema": _make_strict_schema(FollowUpAnalysisResult)
+                    }
+                }
+            )
+            
+            result = FollowUpAnalysisResult.model_validate_json(response.output_text)
+            return {
+                "is_correction": result.is_correction,
+                "correction_confidence": result.correction_confidence,
+                "correction_reason": result.correction_reason,
+                "is_reask": result.is_reask,
+                "reask_confidence": result.reask_confidence,
+                "reask_reason": result.reask_reason
+            }
+            
+        except Exception as e:
+            return {
+                "is_correction": False,
+                "correction_confidence": 0.0,
+                "correction_reason": f"Error: {str(e)}",
+                "is_reask": False,
+                "reask_confidence": 0.0,
+                "reask_reason": f"Error: {str(e)}"
+            }
+    
     def evaluate_hallucination(
         self,
         assistant_response: Message,

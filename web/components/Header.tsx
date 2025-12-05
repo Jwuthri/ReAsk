@@ -15,6 +15,10 @@ export default function Header() {
         
         <nav className={styles.nav}>
           <Link href="/" className={styles.navLink}>Dashboard</Link>
+          <Link href="/agent" className={`${styles.navLink} ${styles.navLinkNew}`}>
+            🤖 Agent Analysis
+            <span className={styles.newBadge}>NEW</span>
+          </Link>
           <a 
             href="https://github.com" 
             target="_blank" 

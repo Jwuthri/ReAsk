@@ -18,10 +18,10 @@ cd web && npm install
 
 ```bash
 # From project root
-uvicorn api.main:app --reload --port 8000
+uvicorn api.main:app --reload --port 8001
 ```
 
-API will be available at `http://localhost:8000`
+API will be available at `http://localhost:8001`
 
 ### 3. Start the Web App
 
@@ -30,7 +30,7 @@ API will be available at `http://localhost:8000`
 cd web && npm run dev
 ```
 
-Web app will be available at `http://localhost:3000`
+Web app will be available at `http://localhost:3001`
 
 ## Dataset Format
 

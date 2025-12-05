@@ -46,7 +46,7 @@ class ReAskDetector:
         similarity_threshold: float = 0.5,
         use_llm_confirmation: bool = True,
         use_llm_judge_fallback: bool = True,
-        
+        use_combined_rdm_ccm: bool = True,
     ):
         console.print(BANNER)
         console.print()
@@ -61,6 +61,7 @@ class ReAskDetector:
         self.similarity_threshold = similarity_threshold
         self.use_llm_confirmation = use_llm_confirmation
         self.use_llm_judge_fallback = use_llm_judge_fallback
+        self.use_combined_rdm_ccm = use_combined_rdm_ccm
     
     def evaluate_response(
         self,
@@ -79,26 +80,30 @@ class ReAskDetector:
         Returns:
             EvalResult with detection type and confidence
         """
-        # Step 1: Check for explicit corrections (RDM) - highest priority
-        # If user explicitly says "that's wrong", it's the clearest signal
+        # Step 1: RDM + CCM detection
         if follow_up is not None:
-            rdm_result = self._check_rdm(follow_up)
-            if rdm_result.is_bad:
-                return rdm_result
+            if self.use_combined_rdm_ccm:
+                # Combined approach: single LLM call for both
+                combined_result = self._check_rdm_ccm_combined(user_message, follow_up)
+                if combined_result.is_bad:
+                    return combined_result
+            else:
+                # Separate approach: RDM first, then CCM (2 LLM calls)
+                rdm_result = self._check_rdm(follow_up)
+                if rdm_result.is_bad:
+                    return rdm_result
+                
+                ccm_result = self._check_ccm(user_message, follow_up)
+                if ccm_result.is_bad:
+                    return ccm_result
         
-        # Step 2: Check for re-asked questions (CCM)
-        if follow_up is not None:
-            ccm_result = self._check_ccm(user_message, follow_up)
-            if ccm_result.is_bad:
-                return ccm_result
-        
-        # Step 3: Check for hallucination if knowledge is provided
+        # Step 2: Check for hallucination if knowledge is provided
         if user_message.knowledge:
             hallucination_result = self._check_hallucination(assistant_response, user_message.knowledge)
             if hallucination_result.is_bad:
                 return hallucination_result
         
-        # Step 4: Fallback to LLM judge
+        # Step 3: Fallback to LLM judge
         if self.use_llm_judge_fallback:
             return self._evaluate_with_judge(user_message, assistant_response, follow_up, user_message.knowledge)
         
@@ -115,6 +120,64 @@ class ReAskDetector:
             detection_type=DetectionType.NONE,
             confidence=0.8,
             reason="No re-ask or correction detected"
+        )
+    
+    def _check_rdm_ccm_combined(self, user_message: Message, follow_up: Message) -> EvalResult:
+        """
+        Combined RDM + CCM check in a single LLM call.
+        
+        Priority: RDM (corrections) > CCM (re-asks)
+        """
+        # Get embedding similarity for context
+        similarity = self.embeddings.similarity(
+            user_message.content,
+            follow_up.content
+        )
+        # console.print(f"[dim]Embedding similarity: {similarity:.2f}[/dim]")
+        
+        # Single LLM call for both RDM and CCM detection
+        result = self.judge.analyze_follow_up(
+            user_message.content,
+            follow_up.content,
+            similarity
+        )
+        
+        # RDM takes priority - explicit corrections are clearest signal
+        if result["is_correction"]:
+            return EvalResult(
+                is_bad=True,
+                detection_type=DetectionType.RDM,
+                confidence=result["correction_confidence"],
+                reason=result["correction_reason"],
+                details={
+                    "similarity": similarity,
+                    "analysis": result
+                }
+            )
+        
+        # CCM - user re-asking same question (only if similarity is high enough)
+        if result["is_reask"] and similarity >= self.similarity_threshold:
+            return EvalResult(
+                is_bad=True,
+                detection_type=DetectionType.CCM,
+                confidence=result["reask_confidence"],
+                reason=result["reask_reason"],
+                details={
+                    "similarity": similarity,
+                    "analysis": result
+                }
+            )
+        
+        # Neither correction nor re-ask detected
+        return EvalResult(
+            is_bad=False,
+            detection_type=DetectionType.NONE,
+            confidence=max(1.0 - result["correction_confidence"], 1.0 - result["reask_confidence"]),
+            reason="No correction or re-ask detected",
+            details={
+                "similarity": similarity,
+                "analysis": result
+            }
         )
     
     def _check_rdm(self, follow_up: Message) -> EvalResult:
@@ -143,7 +206,6 @@ class ReAskDetector:
             user_message.content,
             follow_up.content
         )
-        console.print(f"CCM similarity: {similarity}")
         
         if similarity < self.similarity_threshold:
             return EvalResult(
