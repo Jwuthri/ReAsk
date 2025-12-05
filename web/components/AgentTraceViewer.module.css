@@ -239,6 +239,129 @@
   text-align: right;
 }
 
+/* Per-Agent Scores Section */
+.agentScoresSection {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.sectionTitle {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 1rem 0;
+}
+
+.agentScoresGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.agentScoreCard {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 1rem;
+}
+
+.agentScoreHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.agentName {
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--text-primary);
+}
+
+.agentRole {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  background: var(--card-bg);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  text-transform: capitalize;
+}
+
+.agentMainScore {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.agentMetrics {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.agentMetric {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8rem;
+}
+
+.metricLabel {
+  color: var(--text-secondary);
+}
+
+.metricValue {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.agentIssues {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.issueItem {
+  font-size: 0.8rem;
+  color: var(--accent-orange);
+  padding: 0.25rem 0;
+}
+
+.agentRecommendations {
+  margin-top: 0.5rem;
+}
+
+.recommendationItem {
+  font-size: 0.8rem;
+  color: var(--accent-cyan);
+  padding: 0.25rem 0;
+}
+
+/* Coordination Score */
+.coordinationScore {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  margin-bottom: 1.5rem;
+}
+
+.coordinationLabel {
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
 /* Timeline */
 .timeline {
   background: var(--card-bg);
@@ -583,6 +706,19 @@
   border-left: 3px solid var(--accent-red);
 }
 
+.turn.turnGood {
+  border-left: 3px solid var(--accent-green);
+}
+
+.scoreBadge {
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: white;
+  white-space: nowrap;
+}
+
 .turnHeader {
   display: flex;
   align-items: center;
@@ -671,7 +807,13 @@
   border-color: var(--accent-red);
 }
 
-.badBadge {
+.agentMessage.goodResponse {
+  background: rgba(34, 197, 94, 0.05);
+  border-color: var(--accent-green);
+}
+
+.badBadge,
+.goodBadge {
   padding: 0.25rem 0.5rem;
   border-radius: 4px;
   font-size: 0.7rem;
@@ -754,6 +896,23 @@
 .toolFailure {
   color: var(--accent-red);
   font-size: 0.8rem;
+}
+
+.observation {
+  color: var(--text-secondary);
+  font-style: italic;
+  background: var(--bg-secondary);
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.messageContentEmpty {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 .detectionBadge {

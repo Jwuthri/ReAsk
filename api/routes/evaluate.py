@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Generator, AsyncGenerator
 
-from ..database import get_db, Dataset, Conversation, Message, EvalResult, SessionLocal
+from ..database import get_db, Dataset, Conversation, Message, MessageAnalysisResult, SessionLocal
 from ..schemas import EvalStats
 
 from reask import ReAskDetector, Message as ReAskMessage
@@ -67,8 +67,8 @@ def run_evaluation(dataset_id: int, db: Session):
                     db_msg = messages[idx]
                     
                     # Check if eval result already exists
-                    existing = db.query(EvalResult).filter(
-                        EvalResult.message_id == db_msg.id
+                    existing = db.query(MessageAnalysisResult).filter(
+                        MessageAnalysisResult.message_id == db_msg.id
                     ).first()
                     
                     if existing:
@@ -77,7 +77,7 @@ def run_evaluation(dataset_id: int, db: Session):
                         existing.confidence = result.confidence
                         existing.reason = result.reason
                     else:
-                        eval_result = EvalResult(
+                        eval_result = MessageAnalysisResult(
                             message_id=db_msg.id,
                             is_bad=result.is_bad,
                             detection_type=result.detection_type.value,
@@ -105,7 +105,7 @@ async def evaluate_dataset(
     run_evaluation(dataset_id, db)
     
     # Get stats
-    eval_results = db.query(EvalResult).join(Message).join(Conversation).filter(
+    eval_results = db.query(MessageAnalysisResult).join(Message).join(Conversation).filter(
         Conversation.dataset_id == dataset_id
     ).all()
     
@@ -193,8 +193,8 @@ async def evaluate_dataset_stream(dataset_id: int):
                             db_msg = messages[idx]
                             
                             # Check if eval result already exists
-                            existing = db.query(EvalResult).filter(
-                                EvalResult.message_id == db_msg.id
+                            existing = db.query(MessageAnalysisResult).filter(
+                                MessageAnalysisResult.message_id == db_msg.id
                             ).first()
                             
                             if existing:
@@ -203,7 +203,7 @@ async def evaluate_dataset_stream(dataset_id: int):
                                 existing.confidence = result.confidence
                                 existing.reason = result.reason
                             else:
-                                eval_result = EvalResult(
+                                eval_result = MessageAnalysisResult(
                                     message_id=db_msg.id,
                                     is_bad=result.is_bad,
                                     detection_type=result.detection_type.value,
@@ -241,7 +241,7 @@ async def evaluate_dataset_stream(dataset_id: int):
             db.commit()
             
             # Calculate final stats
-            eval_results = db.query(EvalResult).join(Message).join(Conversation).filter(
+            eval_results = db.query(MessageAnalysisResult).join(Message).join(Conversation).filter(
                 Conversation.dataset_id == dataset_id
             ).all()
             
@@ -300,7 +300,7 @@ async def get_results(
     
     # Get all eval results with message info
     results = db.query(
-        EvalResult, Message, Conversation
+        MessageAnalysisResult, Message, Conversation
     ).join(Message).join(Conversation).filter(
         Conversation.dataset_id == dataset_id
     ).all()

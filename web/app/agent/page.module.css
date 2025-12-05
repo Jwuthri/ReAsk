@@ -259,6 +259,16 @@
   border-color: var(--accent-cyan);
 }
 
+.multiAgentBtn {
+  background: linear-gradient(135deg, rgba(147, 51, 234, 0.15), rgba(59, 130, 246, 0.15));
+  border-color: rgba(147, 51, 234, 0.3);
+}
+
+.multiAgentBtn:hover {
+  background: linear-gradient(135deg, rgba(147, 51, 234, 0.25), rgba(59, 130, 246, 0.25));
+  border-color: rgba(147, 51, 234, 0.5);
+}
+
 .traceInput {
   flex: 1;
   min-height: 400px;
@@ -508,4 +518,139 @@
   font-size: 0.7rem;
   color: var(--text-secondary);
   white-space: nowrap;
+}
+
+/* Live Progress Panel */
+.liveProgressPanel {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(168, 85, 247, 0.1));
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+  animation: progressPulse 2s ease-in-out infinite;
+}
+
+@keyframes progressPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.2); }
+  50% { box-shadow: 0 0 20px 4px rgba(99, 102, 241, 0.15); }
+}
+
+.liveProgressHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.liveProgressIcon {
+  font-size: 1.5rem;
+  animation: iconFlash 0.8s ease-in-out infinite;
+}
+
+@keyframes iconFlash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.liveProgressTitle {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.liveProgressBadge {
+  margin-left: auto;
+  padding: 0.25rem 0.75rem;
+  background: rgba(34, 211, 238, 0.2);
+  border: 1px solid rgba(34, 211, 238, 0.4);
+  border-radius: 20px;
+  font-size: 0.75rem;
+  color: var(--accent-cyan);
+}
+
+.liveProgressStats {
+  display: flex;
+  gap: 2rem;
+  margin-bottom: 1rem;
+}
+
+.liveProgressStat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.statLabel {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.statValue {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.liveProgressBar {
+  height: 8px;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+
+.liveProgressFill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple));
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.liveProgressTurns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.liveProgressTurn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  animation: turnSlideIn 0.3s ease;
+}
+
+@keyframes turnSlideIn {
+  from { opacity: 0; transform: translateY(-8px) scale(0.95); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.turnBad {
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.turnGood {
+  border-color: rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.turnType {
+  padding: 0.15rem 0.4rem;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.turnConf {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
 }

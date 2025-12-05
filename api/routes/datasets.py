@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from ..database import get_db, Dataset, Conversation, Message, EvalResult
+from ..database import get_db, Dataset, Conversation, Message, MessageAnalysisResult
 from ..schemas import (
     DatasetResponse, DatasetDetail, DatasetWithStats, 
     UploadResponse, EvalStats, ConversationWithEvals, MessageWithEval
@@ -209,8 +209,8 @@ async def get_dataset(dataset_id: int, db: Session = Depends(get_db)):
         msg_responses = []
         for msg in messages:
             msg_count += 1
-            eval_result = db.query(EvalResult).filter(
-                EvalResult.message_id == msg.id
+            eval_result = db.query(MessageAnalysisResult).filter(
+                MessageAnalysisResult.message_id == msg.id
             ).first()
             
             msg_responses.append(MessageWithEval(
@@ -231,7 +231,7 @@ async def get_dataset(dataset_id: int, db: Session = Depends(get_db)):
     # Calculate stats if evaluated
     stats = None
     if dataset.evaluated:
-        eval_results = db.query(EvalResult).join(Message).join(Conversation).filter(
+        eval_results = db.query(MessageAnalysisResult).join(Message).join(Conversation).filter(
             Conversation.dataset_id == dataset_id
         ).all()
         

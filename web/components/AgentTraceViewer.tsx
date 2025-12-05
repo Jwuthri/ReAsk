@@ -12,6 +12,7 @@ import {
   SelfCorrectionResult,
   IntentDriftResult,
   ConversationAnalysisResult,
+  PerAgentScore,
 } from '@/lib/api';
 
 interface LiveProgress {
@@ -73,9 +74,14 @@ export default function AgentTraceViewer({ trace, results, loading, liveProgress
           <span className={styles.metaBadge}>
             {trace.turns?.length || 0} turns
           </span>
-          {trace.success !== undefined && (
-            <span className={`${styles.metaBadge} ${trace.success ? styles.success : styles.failure}`}>
-              {trace.success ? '✅ Success' : '❌ Failed'}
+          {trace.agents && trace.agents.length > 0 && (
+            <span className={styles.metaBadge}>
+              🤖 {trace.agents.length} agent{trace.agents.length > 1 ? 's' : ''}
+            </span>
+          )}
+          {trace.total_latency_ms !== undefined && (
+            <span className={styles.metaBadge}>
+              ⏱️ {trace.total_latency_ms}ms
             </span>
           )}
           {trace.total_cost !== undefined && (
@@ -164,6 +170,96 @@ export default function AgentTraceViewer({ trace, results, loading, liveProgress
         </div>
       )}
 
+      {/* Per-Agent Scores */}
+      {results?.per_agent_scores && Object.keys(results.per_agent_scores).length > 0 && (
+        <div className={styles.agentScoresSection}>
+          <h4 className={styles.sectionTitle}>🤖 Per-Agent Scores</h4>
+          <div className={styles.agentScoresGrid}>
+            {Object.entries(results.per_agent_scores).map(([agentId, scores]) => {
+              const agentDef = trace.agents?.find(a => a.id === agentId);
+              const agentName = agentDef?.name || agentId;
+              const scoreColor = scores.overall >= 0.7 ? 'var(--accent-green)' : 
+                                scores.overall >= 0.4 ? 'var(--accent-orange)' : 'var(--accent-red)';
+              return (
+                <div key={agentId} className={styles.agentScoreCard}>
+                  <div className={styles.agentScoreHeader}>
+                    <span className={styles.agentName}>{agentName}</span>
+                    <span className={styles.agentRole}>{agentDef?.role || 'agent'}</span>
+                  </div>
+                  <div className={styles.agentMainScore}>
+                    <div className={styles.scoreBar}>
+                      <div 
+                        className={styles.scoreFill}
+                        style={{ width: `${scores.overall * 100}%`, background: scoreColor }}
+                      />
+                    </div>
+                    <span className={styles.scoreValue} style={{ color: scoreColor }}>
+                      {(scores.overall * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                  <div className={styles.agentMetrics}>
+                    {scores.tool_use != null && (
+                      <div className={styles.agentMetric}>
+                        <span className={styles.metricLabel}>🔧 Tool Use</span>
+                        <span className={styles.metricValue}>{(scores.tool_use * 100).toFixed(0)}%</span>
+                      </div>
+                    )}
+                    {scores.reasoning != null && (
+                      <div className={styles.agentMetric}>
+                        <span className={styles.metricLabel}>🧠 Reasoning</span>
+                        <span className={styles.metricValue}>{(scores.reasoning * 100).toFixed(0)}%</span>
+                      </div>
+                    )}
+                    {scores.handoff != null && (
+                      <div className={styles.agentMetric}>
+                        <span className={styles.metricLabel}>🔄 Handoff</span>
+                        <span className={styles.metricValue}>{(scores.handoff * 100).toFixed(0)}%</span>
+                      </div>
+                    )}
+                    <div className={styles.agentMetric}>
+                      <span className={styles.metricLabel}>💬 Interactions</span>
+                      <span className={styles.metricValue}>{scores.interactions_count}</span>
+                    </div>
+                  </div>
+                  {scores.issues.length > 0 && (
+                    <div className={styles.agentIssues}>
+                      {scores.issues.map((issue, i) => (
+                        <div key={i} className={styles.issueItem}>⚠️ {issue}</div>
+                      ))}
+                    </div>
+                  )}
+                  {scores.recommendations.length > 0 && (
+                    <div className={styles.agentRecommendations}>
+                      {scores.recommendations.map((rec, i) => (
+                        <div key={i} className={styles.recommendationItem}>💡 {rec}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Coordination Score */}
+      {results?.coordination_score != null && (
+        <div className={styles.coordinationScore}>
+          <span className={styles.coordinationLabel}>🤝 Agent Coordination</span>
+          <div className={styles.scoreBar}>
+            <div 
+              className={styles.scoreFill}
+              style={{ 
+                width: `${results.coordination_score * 100}%`,
+                background: results.coordination_score >= 0.7 ? 'var(--accent-green)' : 
+                           results.coordination_score >= 0.4 ? 'var(--accent-orange)' : 'var(--accent-red)'
+              }}
+            />
+          </div>
+          <span className={styles.scoreValue}>{(results.coordination_score * 100).toFixed(0)}%</span>
+        </div>
+      )}
+
       {/* Conversation Timeline */}
       <div className={styles.timeline}>
         <h4 className={styles.timelineTitle}>Conversation Timeline</h4>
@@ -188,6 +284,34 @@ export default function AgentTraceViewer({ trace, results, loading, liveProgress
       )}
     </div>
   );
+}
+
+// Helper to normalize turn data (handles both simple and multi-agent formats)
+function normalizeTurn(turn: any): { 
+  userMessage: string; 
+  agentSteps: AgentStepInput[]; 
+  agentResponse: string;
+  agentId?: string;
+  interactions?: any[];
+} {
+  // Multi-agent format: has agent_interactions
+  if (turn.agent_interactions && turn.agent_interactions.length > 0) {
+    const interaction = turn.agent_interactions[0];
+    return {
+      userMessage: turn.user_message || '',
+      agentSteps: interaction.agent_steps || [],
+      agentResponse: interaction.agent_response || turn.final_response || '',
+      agentId: interaction.agent_id,
+      interactions: turn.agent_interactions,
+    };
+  }
+  
+  // Simple format: direct agent_steps and agent_response
+  return {
+    userMessage: turn.user_message || '',
+    agentSteps: turn.agent_steps || [],
+    agentResponse: turn.agent_response || '',
+  };
 }
 
 // Turn-based conversation card
@@ -222,23 +346,37 @@ function TurnCard({
     return colors[type] || 'var(--text-secondary)';
   };
 
-  const hasTools = turn.agent_steps?.some(s => s.tool_call);
+  // Normalize turn to handle both formats
+  const normalized = normalizeTurn(turn);
+  const hasSteps = normalized.agentSteps.length > 0;
+
+  // Get score color based on confidence
+  const getScoreColor = (isBad: boolean, confidence: number) => {
+    if (isBad) return 'var(--accent-red)';
+    if (confidence >= 0.9) return 'var(--accent-green)';
+    if (confidence >= 0.7) return 'var(--accent-cyan)';
+    return 'var(--accent-orange)';
+  };
 
   return (
-    <div className={`${styles.turn} ${expanded ? styles.expanded : ''} ${conversationResult?.is_bad ? styles.turnBad : ''}`}>
+    <div className={`${styles.turn} ${expanded ? styles.expanded : ''} ${conversationResult?.is_bad ? styles.turnBad : styles.turnGood}`}>
       <button className={styles.turnHeader} onClick={onToggle}>
         <div className={styles.turnIndex}>
           <span className={styles.turnNumber}>{index + 1}</span>
         </div>
         <div className={styles.turnPreview}>
-          <span className={styles.turnUser}>👤 {turn.user_message.slice(0, 50)}{turn.user_message.length > 50 ? '...' : ''}</span>
+          <span className={styles.turnUser}>👤 {normalized.userMessage.slice(0, 50)}{normalized.userMessage.length > 50 ? '...' : ''}</span>
         </div>
-        {conversationResult?.is_bad && (
+        {/* Always show score badge when we have results */}
+        {conversationResult && (
           <span 
-            className={styles.detectionBadge}
-            style={{ background: getDetectionBadge(conversationResult.detection_type) }}
+            className={styles.scoreBadge}
+            style={{ 
+              background: getScoreColor(conversationResult.is_bad, conversationResult.confidence),
+              opacity: conversationResult.is_bad ? 1 : 0.8
+            }}
           >
-            {conversationResult.detection_type.toUpperCase()}
+            {conversationResult.is_bad ? '❌' : '✓'} {conversationResult.detection_type.toUpperCase()} ({(conversationResult.confidence * 100).toFixed(0)}%)
           </span>
         )}
         {driftScore !== undefined && (
@@ -258,16 +396,16 @@ function TurnCard({
           {/* User Message */}
           <div className={styles.messageBlock}>
             <div className={styles.messageHeader}>
-              <span className={styles.messageRole}>👤 User</span>
+              <span className={styles.messageRole}>👤 USER</span>
             </div>
-            <p className={styles.messageContent}>{turn.user_message}</p>
+            <p className={styles.messageContent}>{normalized.userMessage}</p>
           </div>
 
           {/* Agent Steps (if any) */}
-          {turn.agent_steps && turn.agent_steps.length > 0 && (
+          {hasSteps && (
             <div className={styles.agentSteps}>
-              <span className={styles.stepsLabel}>🧠 Agent Reasoning</span>
-              {turn.agent_steps.map((step, stepIndex) => (
+              <span className={styles.stepsLabel}>🧠 Agent Reasoning ({normalized.agentSteps.length} steps)</span>
+              {normalized.agentSteps.map((step: any, stepIndex: number) => (
                 <div key={stepIndex} className={styles.agentStep}>
                   {step.thought && (
                     <div className={styles.stepItem}>
@@ -281,11 +419,17 @@ function TurnCard({
                       <span>{step.action}</span>
                     </div>
                   )}
+                  {step.observation && (
+                    <div className={styles.stepItem}>
+                      <span className={styles.stepItemIcon}>👁️</span>
+                      <span className={styles.observation}>{step.observation}</span>
+                    </div>
+                  )}
                   {step.tool_call && (
                     <div className={styles.toolCallCompact}>
                       <span className={styles.stepItemIcon}>🔧</span>
-                      <code>{step.tool_call.name}</code>
-                      {step.tool_call.result && <span className={styles.toolSuccess}>✓ {step.tool_call.result.slice(0, 50)}</span>}
+                      <code>{step.tool_call.tool_name || step.tool_call.name}</code>
+                      {step.tool_call.result && <span className={styles.toolSuccess}>✓ {String(step.tool_call.result).slice(0, 100)}</span>}
                       {step.tool_call.error && <span className={styles.toolFailure}>✗ {step.tool_call.error}</span>}
                     </div>
                   )}
@@ -295,19 +439,23 @@ function TurnCard({
           )}
 
           {/* Agent Response */}
-          <div className={`${styles.messageBlock} ${styles.agentMessage} ${conversationResult?.is_bad ? styles.badResponse : ''}`}>
+          <div className={`${styles.messageBlock} ${styles.agentMessage} ${conversationResult?.is_bad ? styles.badResponse : conversationResult ? styles.goodResponse : ''}`}>
             <div className={styles.messageHeader}>
-              <span className={styles.messageRole}>🤖 Agent</span>
-              {conversationResult?.is_bad && (
+              <span className={styles.messageRole}>🤖 AGENT{normalized.agentId ? ` (${normalized.agentId})` : ''}</span>
+              {conversationResult && (
                 <span 
-                  className={styles.badBadge}
-                  style={{ background: getDetectionBadge(conversationResult.detection_type) }}
+                  className={conversationResult.is_bad ? styles.badBadge : styles.goodBadge}
+                  style={{ background: getScoreColor(conversationResult.is_bad, conversationResult.confidence) }}
                 >
-                  ❌ {conversationResult.detection_type.toUpperCase()} ({(conversationResult.confidence * 100).toFixed(0)}%)
+                  {conversationResult.is_bad ? '❌' : '✓'} {conversationResult.detection_type.toUpperCase()} ({(conversationResult.confidence * 100).toFixed(0)}%)
                 </span>
               )}
             </div>
-            <p className={styles.messageContent}>{turn.agent_response}</p>
+            {normalized.agentResponse ? (
+              <p className={styles.messageContent}>{normalized.agentResponse}</p>
+            ) : (
+              <p className={styles.messageContentEmpty}>No response recorded</p>
+            )}
             {conversationResult?.reason && (
               <p className={styles.detectionReason}>💡 {conversationResult.reason}</p>
             )}

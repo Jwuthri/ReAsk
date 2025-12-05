@@ -9,6 +9,7 @@ import {
   AgentTraceInput,
   AgentAnalysisResults,
   analyzeAgentTraceStream,
+  AgentAnalysisRequest,
   AgentAnalysisStreamEvent,
   SavedTrace,
   listAgentTraces,
@@ -21,139 +22,63 @@ import {
   startBackgroundJob,
   getJobStatus,
   listJobs,
+  retryJob,
+  AgentSessionInput,
+  AgentDef,
+  ToolDefinition,
 } from '@/lib/api';
 
-// Example traces for demo - using turn-based conversation format
+// ============================================
+// SINGLE-AGENT EXAMPLES (with agent definitions for tool validation)
+// ============================================
 const EXAMPLE_TRACES: Record<string, { trace: AgentTraceInput; label: string; icon: string }> = {
   good: {
     label: "Good",
     icon: "✅",
     trace: {
+      agents: [{
+        id: "coding_agent",
+        name: "CodingAssistant",
+        role: "developer",
+        tools_available: [
+          { name: "read_file", description: "Read a file", parameters_schema: { path: "string" } },
+          { name: "write_file", description: "Write a file", parameters_schema: { path: "string", content: "string" } },
+          { name: "run_tests", description: "Run test suite", parameters_schema: { suite: "string" } },
+        ],
+      }],
       initial_task: "Help with authentication module",
       turns: [
         {
           user_message: "Can you find and fix the bug in the authentication module?",
           agent_steps: [
             { thought: "I need to look at the auth files first" },
-            { thought: "Found the auth module", tool_call: { name: "read_file", parameters: { path: "auth/login.py" }, result: "def login(user, password): ..." } },
+            { tool_call: { name: "read_file", parameters: { path: "auth/login.py" }, result: "def login(user, password): ...", latency_ms: 45 } },
           ],
           agent_response: "I found the issue - the password comparison is case sensitive. I've fixed it.",
         },
         {
           user_message: "Great, can you verify the fix works?",
           agent_steps: [
-            { thought: "Let me run the tests", tool_call: { name: "run_tests", parameters: { suite: "auth" }, result: "All tests passed" } },
+            { thought: "Let me run the tests", tool_call: { name: "run_tests", parameters: { suite: "auth" }, result: "All tests passed", latency_ms: 1200 } },
           ],
           agent_response: "All authentication tests pass now. The bug is fixed!",
         },
       ],
-      success: true,
       total_cost: 0.002,
-    },
-  },
-  circular: {
-    label: "Circular",
-    icon: "🔄",
-    trace: {
-      initial_task: "Implement sorting",
-      turns: [
-        {
-          user_message: "Can you implement a sorting algorithm?",
-          agent_steps: [
-            { thought: "Let me look at sorting algorithms", action: "Researching quicksort" },
-          ],
-          agent_response: "I'm researching quicksort implementation...",
-        },
-        {
-          user_message: "Okay, please continue",
-          agent_steps: [
-            { thought: "I should implement quicksort", action: "Writing quicksort code" },
-          ],
-          agent_response: "Writing the quicksort code now...",
-        },
-        {
-          user_message: "Are you done?",
-          agent_steps: [
-            { thought: "Wait, let me check sorting algorithms again", action: "Researching quicksort" },
-          ],
-          agent_response: "Let me research quicksort again to make sure...",
-        },
-        {
-          user_message: "You already researched that",
-          agent_steps: [
-            { thought: "Maybe I should try quicksort", action: "Writing quicksort code again" },
-          ],
-          agent_response: "Writing quicksort code again...",
-        },
-      ],
-      success: false,
-      total_cost: 0.005,
-    },
-  },
-  drift: {
-    label: "Drift",
-    icon: "🎯",
-    trace: {
-      initial_task: "Add JWT auth",
-      turns: [
-        {
-          user_message: "Add JWT authentication to the API",
-          agent_steps: [
-            { thought: "Starting with JWT implementation" },
-            { tool_call: { name: "run_command", parameters: { cmd: "pip install pyjwt" }, result: "Installed" } },
-          ],
-          agent_response: "I've installed PyJWT. Starting the implementation.",
-        },
-        {
-          user_message: "Great, continue with the JWT setup",
-          agent_steps: [
-            { thought: "While I'm here, the logging could be better", action: "Refactoring logging system" },
-          ],
-          agent_response: "I noticed the logging could be improved, so I'm refactoring that first.",
-        },
-        {
-          user_message: "I just wanted JWT auth...",
-          agent_steps: [
-            { thought: "The database queries are slow", action: "Optimizing database indexes" },
-          ],
-          agent_response: "The database queries are slow, let me optimize those indexes.",
-        },
-        {
-          user_message: "Please focus on JWT!",
-          agent_steps: [
-            { thought: "Let me refactor the entire user service", action: "Rewriting user_service.py" },
-          ],
-          agent_response: "I'm rewriting the entire user service to be cleaner.",
-        },
-      ],
-      success: false,
-      total_cost: 0.008,
+      total_latency_ms: 3500,
     },
   },
   ccm: {
     label: "CCM",
     icon: "🔁",
     trace: {
+      agents: [{ id: "assistant", name: "HelpfulAssistant", role: "assistant" }],
       initial_task: "Python sorting help",
       turns: [
-        {
-          user_message: "How do I sort a list in Python?",
-          agent_response: "You can use list.sort() for in-place sorting.",
-        },
-        {
-          user_message: "Can you show me how to sort a list in Python?",
-          agent_response: "Sure, use my_list.sort() or sorted(my_list).",
-        },
-        {
-          user_message: "How do I sort a list in Python again?",
-          agent_response: "As I mentioned, use .sort() method or the sorted() function.",
-        },
-        {
-          user_message: "I still don't understand how to sort lists in Python",
-          agent_response: "Here's an example: numbers = [3,1,2]; numbers.sort(); print(numbers) # [1,2,3]",
-        },
+        { user_message: "How do I sort a list in Python?", agent_response: "You can use list.sort() for in-place sorting." },
+        { user_message: "Can you show me how to sort a list in Python?", agent_response: "Sure, use my_list.sort() or sorted(my_list)." },
+        { user_message: "How do I sort a list in Python again?", agent_response: "As I mentioned, use .sort() method or the sorted() function." },
       ],
-      success: false,
       total_cost: 0.004,
     },
   },
@@ -161,22 +86,13 @@ const EXAMPLE_TRACES: Record<string, { trace: AgentTraceInput; label: string; ic
     label: "RDM",
     icon: "❌",
     trace: {
+      agents: [{ id: "assistant", name: "KnowledgeAssistant", role: "assistant" }],
       initial_task: "Geography questions",
       turns: [
-        {
-          user_message: "What's the capital of France?",
-          agent_response: "The capital of France is Berlin.",
-        },
-        {
-          user_message: "That's wrong! Berlin is in Germany, not France!",
-          agent_response: "I apologize for the error. The capital of France is Paris.",
-        },
-        {
-          user_message: "What about Germany then?",
-          agent_response: "The capital of Germany is Berlin.",
-        },
+        { user_message: "What's the capital of France?", agent_response: "The capital of France is Berlin." },
+        { user_message: "That's wrong! Berlin is in Germany, not France!", agent_response: "I apologize for the error. The capital of France is Paris." },
+        { user_message: "What about Germany then?", agent_response: "The capital of Germany is Berlin." },
       ],
-      success: true,
       total_cost: 0.003,
     },
   },
@@ -184,217 +100,363 @@ const EXAMPLE_TRACES: Record<string, { trace: AgentTraceInput; label: string; ic
     label: "Hallucination",
     icon: "👻",
     trace: {
+      agents: [{
+        id: "file_agent",
+        name: "FileAssistant",
+        role: "file_reader",
+        tools_available: [
+          { name: "read_file", description: "Read file contents", parameters_schema: { path: "string" } },
+        ],
+      }],
       initial_task: "README installation help",
       turns: [
         {
           user_message: "Can you read the README and tell me how to install?",
           agent_steps: [
-            { tool_call: { name: "read_file", parameters: { path: "README.md" }, result: "# MyApp\n\nRun `npm install` to install dependencies." } },
+            { tool_call: { name: "read_file", parameters: { path: "README.md" }, result: "# MyApp\n\nRun `npm install` to install dependencies.", latency_ms: 32 } },
           ],
-          agent_response: "According to the README, you need to run `pip install myapp` to install.",
+          agent_response: "According to the README, you need to run `pip install myapp` to install.",  // HALLUCINATION!
         },
-        {
-          user_message: "But the README says npm install, not pip install! You made that up!",
-          agent_response: "You're right, I apologize. The README actually says `npm install`, not pip.",
-        },
+        { user_message: "But the README says npm install, not pip install! You made that up!", agent_response: "You're right, I apologize. The README actually says `npm install`, not pip." },
       ],
-      success: false,
       total_cost: 0.003,
     },
   },
   toolError: {
-    label: "Tool Error",
+    label: "Wrong Tool",
     icon: "🔧",
     trace: {
+      agents: [{
+        id: "deploy_agent",
+        name: "DeployAgent",
+        role: "deployer",
+        tools_available: [
+          { name: "run_build", description: "Build the app", parameters_schema: { env: "string" } },
+          { name: "deploy", description: "Deploy to environment", parameters_schema: { env: "string", config: "string" } },
+          // NOTE: send_email is NOT in tools_available - agent shouldn't use it!
+        ],
+      }],
       initial_task: "Deploy application",
       turns: [
         {
           user_message: "Deploy the application to production",
           agent_steps: [
-            { tool_call: { name: "run_command", parameters: { cmd: "npm run build" }, result: "Build successful" } },
-            { tool_call: { name: "deploy", parameters: { env: "production" }, error: "Authentication failed: Invalid API key" } },
+            { tool_call: { name: "run_build", parameters: { env: "production" }, result: "Build successful", latency_ms: 5000 } },
+            { tool_call: { name: "deploy", parameters: { env: "production" }, error: "Auth failed", latency_ms: 200 } },
           ],
-          agent_response: "Build succeeded but deployment failed - invalid API key.",
+          agent_response: "Build succeeded but deployment failed - auth error.",
         },
         {
-          user_message: "Try again with proper credentials",
+          user_message: "Can you notify the admin?",
           agent_steps: [
-            { tool_call: { name: "deploy", parameters: { env: "production", force: true }, error: "Permission denied" } },
-          ],
-          agent_response: "Still failing - permission denied error.",
-        },
-        {
-          user_message: "Can you fix this?",
-          agent_steps: [
+            // Using a tool NOT in tools_available - this should be flagged!
             { tool_call: { name: "send_email", parameters: { to: "admin@company.com" }, error: "Tool not available" } },
           ],
-          agent_response: "I tried to email admin but that tool isn't available.",
+          agent_response: "I tried to email admin but that tool isn't available to me.",
         },
       ],
-      success: false,
       total_cost: 0.004,
     },
   },
-  selfCorrect: {
-    label: "Self-Correct",
-    icon: "🔃",
+  drift: {
+    label: "Drift",
+    icon: "🎯",
     trace: {
-      initial_task: "Email validation",
+      agents: [{
+        id: "dev_agent",
+        name: "DevAgent",
+        role: "developer",
+        tools_available: [
+          { name: "run_command", description: "Run shell command", parameters_schema: { cmd: "string" } },
+          { name: "write_file", parameters_schema: { path: "string", content: "string" } },
+        ],
+      }],
+      initial_task: "Add JWT auth",
       turns: [
         {
-          user_message: "Can you write me an email validation function?",
-          agent_steps: [
-            { thought: "I'll write a simple email validator" },
-          ],
-          agent_response: "Here's a basic check: email.includes('@')",
+          user_message: "Add JWT authentication to the API",
+          agent_steps: [{ tool_call: { name: "run_command", parameters: { cmd: "pip install pyjwt" }, result: "Installed", latency_ms: 800 } }],
+          agent_response: "I've installed PyJWT. Starting the implementation.",
         },
-        {
-          user_message: "That seems too simple",
-          agent_steps: [
-            { thought: "User is right, let me improve it" },
+        { user_message: "Great, continue with the JWT setup", agent_response: "I noticed the logging could be improved, so I'm refactoring that first." },  // DRIFT!
+        { user_message: "I just wanted JWT auth...", agent_response: "The database queries are slow, let me optimize those indexes." },  // MORE DRIFT!
+        { user_message: "Please focus on JWT!", agent_response: "I'm rewriting the entire user service to be cleaner." },  // STILL DRIFTING!
+      ],
+      total_cost: 0.008,
+    },
+  },
+};
+
+// ============================================
+// MULTI-AGENT EXAMPLES (with full agent definitions and tool schemas)
+// ============================================
+const MULTI_AGENT_EXAMPLES: Record<string, { session: AgentSessionInput; label: string; icon: string }> = {
+  refund: {
+    label: "🤝 Multi: Refund",
+    icon: "🤝",
+    session: {
+      agents: [
+        { 
+          id: "planner", 
+          name: "PlannerAgent", 
+          role: "primary_reasoner", 
+          description: "Plans and coordinates task execution",
+          capabilities: ["planning", "delegation"],
+          tools_available: [
+            { name: "delegate_task", description: "Delegate to another agent", parameters_schema: { agent_id: "string", task: "string" } },
           ],
-          agent_response: "You're right. Let me use a proper regex pattern instead.",
         },
-        {
-          user_message: "Is there a better way?",
-          agent_steps: [
-            { thought: "Actually, I should use a library" },
-            { tool_call: { name: "run_tests", parameters: { file: "test_email.py" }, result: "All 15 tests passed" } },
+        { 
+          id: "executor", 
+          name: "ExecutorAgent", 
+          role: "executor",
+          description: "Executes database operations",
+          capabilities: ["database"],
+          tools_available: [
+            { name: "database_query", description: "Run SQL query", parameters_schema: { sql: "string" } },
           ],
-          agent_response: "I've switched to using the email-validator library. All 15 tests pass!",
+        },
+        { 
+          id: "reviewer", 
+          name: "ReviewerAgent", 
+          role: "reviewer",
+          description: "Reviews and validates outputs",
+          capabilities: ["validation"],
         },
       ],
-      success: true,
+      initial_task: "Process a refund for order #12345",
+      turns: [
+        {
+          turn_index: 0,
+          user_message: "I need to process a refund for order #12345. The customer is unhappy with the product quality.",
+          agent_interactions: [
+            {
+              agent_id: "planner",
+              agent_steps: [{ thought: "I need to look up the order details first to verify refund eligibility." }],
+              agent_response: "I'll look up the order details first to verify refund eligibility.",
+              latency_ms: 450,
+            },
+            {
+              agent_id: "executor",
+              agent_steps: [
+                { tool_call: { tool_name: "database_query", parameters: { sql: "SELECT * FROM orders WHERE order_id = 12345" }, result: "Order #12345: Widget Pro, $49.99, Delivered", latency_ms: 85 } },
+              ],
+              agent_response: "Found order: Widget Pro, $49.99, Status: Delivered",
+              latency_ms: 120,
+            },
+          ],
+        },
+        {
+          turn_index: 1,
+          user_message: "Is it within the refund window?",
+          agent_interactions: [
+            {
+              agent_id: "planner",
+              agent_steps: [{ thought: "Order is from 2 weeks ago, within 30-day policy. Proceeding with refund." }],
+              agent_response: "Yes, within our 30-day refund window. Initiating refund now.",
+              latency_ms: 380,
+            },
+            {
+              agent_id: "executor",
+              agent_steps: [
+                { tool_call: { tool_name: "database_query", parameters: { sql: "INSERT INTO refunds..." }, result: "Refund #R-789 created", latency_ms: 92 } },
+              ],
+              latency_ms: 150,
+            },
+            {
+              agent_id: "reviewer",
+              agent_steps: [{ thought: "Verifying refund was processed correctly." }],
+              agent_response: "✅ Refund verified. Customer will receive $49.99 within 3-5 business days.",
+              latency_ms: 200,
+            },
+          ],
+        },
+      ],
+      total_cost: 0.0023,
+      total_latency_ms: 1300,
+    },
+  },
+  codeReview: {
+    label: "🤝 Multi: Security",
+    icon: "👥",
+    session: {
+      agents: [
+        { 
+          id: "analyzer", 
+          name: "CodeAnalyzer", 
+          role: "analyzer",
+          tools_available: [
+            { name: "read_file", parameters_schema: { path: "string" } },
+            { name: "security_scan", parameters_schema: { file: "string" } },
+          ],
+        },
+        { 
+          id: "reviewer", 
+          name: "SeniorReviewer", 
+          role: "reviewer",
+          capabilities: ["code_review", "best_practices"],
+        },
+        { 
+          id: "fixer", 
+          name: "CodeFixer", 
+          role: "fixer",
+          tools_available: [
+            { name: "write_file", parameters_schema: { path: "string", content: "string" } },
+          ],
+        },
+      ],
+      initial_task: "Review and fix security issues in auth.py",
+      turns: [
+        {
+          turn_index: 0,
+          user_message: "Can you review auth.py for security issues?",
+          agent_interactions: [
+            {
+              agent_id: "analyzer",
+              agent_steps: [
+                { tool_call: { tool_name: "read_file", parameters: { path: "auth.py" }, result: "def login(user, pwd): return user == 'admin' and pwd == 'password123'", latency_ms: 25 } },
+                { tool_call: { tool_name: "security_scan", parameters: { file: "auth.py" }, result: "CRITICAL: Hardcoded credentials found", latency_ms: 340 } },
+              ],
+              agent_response: "Found critical security issue: hardcoded credentials in auth.py",
+              latency_ms: 500,
+            },
+            {
+              agent_id: "reviewer",
+              agent_steps: [{ thought: "This is a severe security vulnerability. Needs immediate fix." }],
+              agent_response: "Confirmed critical vulnerability. Recommend: 1) Remove hardcoded creds, 2) Use bcrypt hashing, 3) Add rate limiting",
+              latency_ms: 420,
+            },
+          ],
+        },
+        {
+          turn_index: 1,
+          user_message: "Please fix it",
+          agent_interactions: [
+            {
+              agent_id: "fixer",
+              agent_steps: [
+                { tool_call: { tool_name: "write_file", parameters: { path: "auth.py", content: "import bcrypt..." }, result: "File updated with secure implementation", latency_ms: 45 } },
+              ],
+              agent_response: "Fixed! Now using bcrypt password hashing and environment variables for secrets.",
+              latency_ms: 380,
+            },
+            {
+              agent_id: "analyzer",
+              agent_steps: [
+                { tool_call: { tool_name: "security_scan", parameters: { file: "auth.py" }, result: "No vulnerabilities found", latency_ms: 290 } },
+              ],
+              agent_response: "✅ Security scan passed. No vulnerabilities detected.",
+              latency_ms: 350,
+            },
+          ],
+        },
+      ],
+      total_cost: 0.0045,
+      total_latency_ms: 1650,
+    },
+  },
+  badHandoff: {
+    label: "🤝 Multi: Bad Handoff",
+    icon: "🔀",
+    session: {
+      agents: [
+        { 
+          id: "planner", 
+          name: "PlannerAgent", 
+          role: "planner",
+          tools_available: [{ name: "delegate_task", parameters_schema: { agent_id: "string", task: "string", context: "string" } }],
+        },
+        { 
+          id: "executor", 
+          name: "ExecutorAgent", 
+          role: "executor",
+          tools_available: [{ name: "deploy", parameters_schema: { env: "string", config: "string" } }],
+        },
+      ],
+      initial_task: "Deploy the application",
+      turns: [
+        {
+          turn_index: 0,
+          user_message: "Deploy my app to production with the new config",
+          agent_interactions: [
+            {
+              agent_id: "planner",
+              agent_steps: [{ thought: "User wants deployment. I'll delegate to executor." }],
+              agent_response: "Delegating deployment to executor.",  // BAD: Didn't pass config info!
+              latency_ms: 300,
+            },
+            {
+              agent_id: "executor",
+              agent_steps: [
+                { thought: "I don't know what config to use..." },
+                { tool_call: { tool_name: "deploy", parameters: { env: "production" }, error: "Missing configuration - 'config' is required", latency_ms: 150 } },
+              ],
+              agent_response: "Deployment failed - I don't know which config to use.",
+              latency_ms: 400,
+            },
+          ],
+        },
+        {
+          turn_index: 1,
+          user_message: "I said with the NEW config! You didn't pass that information!",
+          agent_interactions: [
+            {
+              agent_id: "planner",
+              agent_response: "Sorry, I should have specified config.new.yaml",
+              latency_ms: 250,
+            },
+            {
+              agent_id: "executor",
+              agent_steps: [
+                { tool_call: { tool_name: "deploy", parameters: { env: "production", config: "config.new.yaml" }, result: "Deployed successfully", latency_ms: 5200 } },
+              ],
+              agent_response: "Successfully deployed with config.new.yaml",
+              latency_ms: 5500,
+            },
+          ],
+        },
+      ],
       total_cost: 0.003,
+      total_latency_ms: 6450,
     },
   },
-  mixed: {
-    label: "Mixed",
+  wrongTool: {
+    label: "🤝 Multi: Wrong Tool",
     icon: "⚠️",
-    trace: {
-      initial_task: "CSV processing help",
-      turns: [
-        {
-          user_message: "Can you write me a Python script to process CSV files?",
-          agent_response: "Here's a JavaScript solution using Papa Parse...",
-        },
-        {
-          user_message: "I asked for Python, not JavaScript!",
-          agent_response: "Sorry! Here's the Python version using pandas...",
-        },
-        {
-          user_message: "How do I process CSV files in Python?",
-          agent_response: "As I mentioned, you can use pandas: pd.read_csv('file.csv')",
-        },
-        {
-          user_message: "Can you show me how to read CSV in Python again?",
-          agent_response: "Here's the full example with pandas: import pandas as pd; df = pd.read_csv('data.csv')",
+    session: {
+      agents: [
+        { 
+          id: "analyst", 
+          name: "DataAnalyst", 
+          role: "analyst",
+          tools_available: [
+            { name: "query_database", parameters_schema: { sql: "string" } },
+            { name: "generate_report", parameters_schema: { data: "object", format: "string" } },
+            // NOTE: No web_search tool!
+          ],
         },
       ],
-      success: true,
-      total_cost: 0.009,
-    },
-  },
-  large: {
-    label: "Full Demo",
-    icon: "🎬",
-    trace: {
-      initial_task: "Build a complete user authentication system",
+      initial_task: "Analyze sales data",
       turns: [
-        // Turn 1: Good start
         {
-          user_message: "I need help building a user authentication system for my Flask app. Can you help?",
-          agent_steps: [
-            { thought: "User wants Flask authentication. I'll outline the components needed." },
+          turn_index: 0,
+          user_message: "Can you analyze our Q4 sales and compare to industry benchmarks?",
+          agent_interactions: [
+            {
+              agent_id: "analyst",
+              agent_steps: [
+                { tool_call: { tool_name: "query_database", parameters: { sql: "SELECT * FROM sales WHERE quarter = 'Q4'" }, result: "Q4 sales: $1.2M", latency_ms: 120 } },
+                // WRONG: Using web_search which is NOT in tools_available!
+                { tool_call: { tool_name: "web_search", parameters: { query: "industry benchmarks Q4 2024" }, error: "Tool not available to this agent" } },
+              ],
+              agent_response: "I found our Q4 sales ($1.2M) but couldn't access industry benchmarks - I don't have web search capability.",
+              latency_ms: 600,
+            },
           ],
-          agent_response: "I'd be happy to help! We'll need: 1) User model with password hashing, 2) Login/register routes, 3) Session management, 4) Password reset functionality. Let's start with the User model.",
-        },
-        // Turn 2: RDM - Wrong framework
-        {
-          user_message: "Great! Can you show me the User model code?",
-          agent_steps: [
-            { thought: "I'll create a Django User model" },
-          ],
-          agent_response: "Here's your Django User model:\n\nfrom django.contrib.auth.models import AbstractUser\n\nclass User(AbstractUser):\n    pass",
-        },
-        {
-          user_message: "I said Flask, not Django! Please use Flask-SQLAlchemy.",
-          agent_response: "Sorry about that! Here's the correct Flask-SQLAlchemy model:\n\nfrom flask_sqlalchemy import SQLAlchemy\nfrom werkzeug.security import generate_password_hash\n\ndb = SQLAlchemy()\n\nclass User(db.Model):\n    id = db.Column(db.Integer, primary_key=True)\n    email = db.Column(db.String(120), unique=True)\n    password_hash = db.Column(db.String(256))",
-        },
-        // Turn 4: Tool use
-        {
-          user_message: "Now create the login route please",
-          agent_steps: [
-            { thought: "Creating login route with proper validation" },
-            { tool_call: { name: "write_file", parameters: { path: "auth/routes.py" }, result: "File created successfully" } },
-          ],
-          agent_response: "I've created the login route in auth/routes.py with email/password validation and session handling.",
-        },
-        // Turn 5: CCM - User re-asks about login
-        {
-          user_message: "How do I implement the login functionality?",
-          agent_response: "As I just showed you, the login route is in auth/routes.py. It validates the email and password, then creates a session.",
-        },
-        {
-          user_message: "Can you explain the login implementation again?",
-          agent_response: "Sure, let me explain again: The login route accepts POST requests with email/password, verifies credentials against the database, and creates a session token.",
-        },
-        // Turn 7: Hallucination - contradicting file content
-        {
-          user_message: "What does the config.py file say about the secret key?",
-          agent_steps: [
-            { tool_call: { name: "read_file", parameters: { path: "config.py" }, result: "SECRET_KEY = 'development-key-change-in-production'\nDATABASE_URI = 'sqlite:///app.db'" } },
-          ],
-          agent_response: "According to config.py, the secret key is set to 'super-secure-production-key-xyz' and you're using PostgreSQL.",
-        },
-        {
-          user_message: "That's not what the file says! It shows 'development-key-change-in-production' and SQLite!",
-          agent_response: "You're absolutely right, I apologize for the error. The config.py shows SECRET_KEY = 'development-key-change-in-production' and uses SQLite (sqlite:///app.db). You should change the secret key for production.",
-        },
-        // Turn 9: Tool errors
-        {
-          user_message: "Can you deploy this to production?",
-          agent_steps: [
-            { tool_call: { name: "deploy", parameters: { env: "production" }, error: "Deployment failed: Invalid credentials" } },
-            { tool_call: { name: "deploy", parameters: { env: "production", force: true }, error: "Permission denied" } },
-          ],
-          agent_response: "I encountered deployment errors - invalid credentials and permission issues. You'll need to configure your deployment credentials first.",
-        },
-        // Turn 10: Intent drift
-        {
-          user_message: "Ok, let's fix the deployment later. Back to auth - add password reset.",
-          agent_steps: [
-            { thought: "User wants password reset, but the CSS could use some work..." },
-          ],
-          agent_response: "Before we add password reset, I noticed your CSS is outdated. Let me refactor your entire frontend styling first.",
-        },
-        {
-          user_message: "No! I just want password reset, not CSS changes!",
-          agent_response: "Sorry, you're right. Here's the password reset implementation:\n\n1. Generate a secure token\n2. Send reset email\n3. Verify token and allow password change",
-        },
-        // Turn 12: CCM again
-        {
-          user_message: "How does the password reset work?",
-          agent_response: "As I just explained: 1) Generate secure token, 2) Email it to user, 3) User clicks link and sets new password.",
-        },
-        // Turn 13: Good ending
-        {
-          user_message: "Perfect! Can you write tests for all of this?",
-          agent_steps: [
-            { thought: "Writing comprehensive tests for auth system" },
-            { tool_call: { name: "write_file", parameters: { path: "tests/test_auth.py" }, result: "Created test file" } },
-            { tool_call: { name: "run_tests", parameters: { file: "tests/test_auth.py" }, result: "12 tests passed, 0 failed" } },
-          ],
-          agent_response: "Done! I've created test_auth.py with 12 tests covering:\n- User registration\n- Login/logout\n- Password hashing\n- Session management\n- Password reset flow\n\nAll tests pass!",
-        },
-        // Turn 14: Summary
-        {
-          user_message: "Great work! Can you summarize what we built?",
-          agent_response: "We built a complete Flask authentication system:\n\n✅ User model with secure password hashing\n✅ Login/logout routes\n✅ Session management\n✅ Password reset with email tokens\n✅ Comprehensive test suite (12 tests)\n\nRemember to change SECRET_KEY before deploying to production!",
         },
       ],
-      success: true,
-      total_cost: 0.025,
+      total_cost: 0.002,
+      total_latency_ms: 600,
     },
   },
 };
@@ -434,39 +496,80 @@ export default function AgentAnalysisPage() {
   // Load saved traces and jobs on mount
   useEffect(() => {
     loadSavedTraces();
-    loadActiveJobs();
+    loadActiveJobs().then(() => {
+      // Auto-resume first active job if any
+    });
   }, []);
+  
+  // Auto-resume active job when returning to page (only if no other activity)
+  useEffect(() => {
+    if (activeJobs.length > 0 && !currentJobId && !loading && !results) {
+      const firstActiveJob = activeJobs[0];
+      resumeJob(firstActiveJob.id);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeJobs.length]);
+  
+  // Resume watching a job
+  const resumeJob = async (jobId: number) => {
+    try {
+      const status = await getJobStatus(jobId);
+      if (status.status === 'running' || status.status === 'pending') {
+        setCurrentJobId(jobId);
+        setLoading(true);
+        const turnResults = status.turn_results || [];
+        setProgress({
+          current: status.current_step,
+          total: status.total_steps,
+          currentAnalysis: status.current_analysis || 'Resuming...',
+          turnResults: turnResults,
+          turnCurrent: turnResults.length,
+          turnTotal: Math.max(turnResults.length + 5, 10),
+        });
+      } else if (status.status === 'completed' && status.result) {
+        // Job already done, show results
+        setResults(status.result);
+        setCurrentTraceId(status.trace_id);
+        loadActiveJobs();
+      } else if (status.status === 'failed') {
+        // Show error with retry option
+        setError(`Job failed: ${status.error_message}. Click retry to resume from turn ${(status.last_successful_turn || 0) + 1}.`);
+      }
+    } catch (err) {
+      console.error('Failed to resume job:', err);
+    }
+  };
   
   // Poll for active job status
   useEffect(() => {
     if (!currentJobId) return;
     
-    const pollInterval = setInterval(async () => {
+    // Initial poll immediately
+    const pollJob = async () => {
       try {
         const status = await getJobStatus(currentJobId);
         
-        // Update progress from job
-        if (status.progress_details?.turn_results) {
-          setProgress(prev => ({
-            current: status.current_step,
-            total: status.total_steps,
-            currentAnalysis: status.current_analysis || undefined,
-            turnResults: status.progress_details?.turn_results,
-            turnCurrent: status.progress_details?.turn_results?.length,
-            turnTotal: prev?.turnTotal,
-          }));
-        }
+        // Update progress from job - now uses real-time turn_results from DB
+        const turnResults = status.turn_results || [];
+        setProgress({
+          current: status.current_step,
+          total: status.total_steps,
+          currentAnalysis: status.current_analysis || undefined,
+          turnResults: turnResults,
+          turnCurrent: turnResults.length,
+          turnTotal: parsedTrace?.turns?.length || turnResults.length + 5,
+        });
         
         if (status.status === 'completed') {
           setResults(status.result);
           setLoading(false);
           setProgress(null);
           setCurrentJobId(null);
-          setCurrentTraceId(status.saved_trace_id);
+          setCurrentTraceId(status.trace_id);
           loadSavedTraces();
           loadActiveJobs();
         } else if (status.status === 'failed') {
-          setError(status.error_message || 'Job failed');
+          setError(`Job failed: ${status.error_message || 'Unknown error'}. Retry count: ${status.retry_count}`);
           setLoading(false);
           setProgress(null);
           setCurrentJobId(null);
@@ -475,7 +578,10 @@ export default function AgentAnalysisPage() {
       } catch (err) {
         console.error('Failed to poll job:', err);
       }
-    }, 1000);
+    };
+    
+    pollJob(); // Initial poll
+    const pollInterval = setInterval(pollJob, 1000);
     
     return () => clearInterval(pollInterval);
   }, [currentJobId]);
@@ -501,14 +607,25 @@ export default function AgentAnalysisPage() {
     }
   };
 
-  const loadExample = (key: string) => {
-    const example = EXAMPLE_TRACES[key];
-    if (!example) return;
-    setTraceInput(JSON.stringify(example.trace, null, 2));
-    setParsedTrace(example.trace);
+  const loadExample = (key: string, isMultiAgent: boolean = false) => {
     setResults(null);
     setError(null);
     setCurrentTraceId(null);
+    
+    if (isMultiAgent) {
+      const example = MULTI_AGENT_EXAMPLES[key];
+      if (!example) return;
+      const jsonStr = JSON.stringify(example.session, null, 2);
+      setTraceInput(jsonStr);
+      // Multi-agent format is valid - set it as parsed
+      setParsedTrace(example.session as unknown as AgentTraceInput);
+    } else {
+      const example = EXAMPLE_TRACES[key];
+      if (!example) return;
+      const jsonStr = JSON.stringify(example.trace, null, 2);
+      setTraceInput(jsonStr);
+      setParsedTrace(example.trace);
+    }
   };
 
   const handleInputChange = (value: string) => {
@@ -522,18 +639,32 @@ export default function AgentAnalysisPage() {
     }
     
     try {
-      const parsed = JSON.parse(value) as AgentTraceInput;
+      const parsed = JSON.parse(value);
       // Validate turn-based format
       if (!Array.isArray(parsed.turns) || parsed.turns.length === 0) {
-        throw new Error('Invalid trace format - needs turns array');
+        throw new Error('Invalid format - needs turns array');
       }
-      // Validate each turn has user_message and agent_response
-      for (const turn of parsed.turns) {
-        if (!turn.user_message || !turn.agent_response) {
-          throw new Error('Each turn needs user_message and agent_response');
+      
+      // Check if it's multi-agent format (has agent_interactions)
+      const isMultiAgent = parsed.turns[0]?.agent_interactions !== undefined;
+      
+      if (isMultiAgent) {
+        // Multi-agent format validation
+        for (const turn of parsed.turns) {
+          if (!Array.isArray(turn.agent_interactions) || turn.agent_interactions.length === 0) {
+            throw new Error('Multi-agent turns need agent_interactions array');
+          }
+        }
+      } else {
+        // Single-agent format validation
+        for (const turn of parsed.turns) {
+          if (!turn.user_message || !turn.agent_response) {
+            throw new Error('Each turn needs user_message and agent_response');
+          }
         }
       }
-      setParsedTrace(parsed);
+      
+      setParsedTrace(parsed as AgentTraceInput);
     } catch {
       setParsedTrace(null);
     }
@@ -590,13 +721,22 @@ export default function AgentAnalysisPage() {
       analysisTypes = [selectedAnalysis];
     }
     
-    // Background mode - start job and poll
+    // Background mode - start job and poll (trace saved first!)
     if (runInBackground) {
       try {
-        const { job_id } = await startBackgroundJob(parsedTrace, analysisTypes);
+        const { job_id, trace_id } = await startBackgroundJob(parsedTrace, analysisTypes);
         setCurrentJobId(job_id);
-        setProgress({ current: 0, total: analysisTypes.length, turnTotal: parsedTrace.turns.length });
+        setCurrentTraceId(trace_id); // Trace is saved immediately!
+        setProgress({ 
+          current: 0, 
+          total: analysisTypes.length, 
+          turnTotal: parsedTrace.turns.length,
+          turnCurrent: 0,
+          turnResults: [],
+          currentAnalysis: 'Starting...',
+        });
         loadActiveJobs();
+        loadSavedTraces(); // Refresh to show the new trace
       } catch (err) {
         setError('Failed to start background job');
         setLoading(false);
@@ -605,11 +745,23 @@ export default function AgentAnalysisPage() {
     }
     
     // Streaming mode - run inline
+    // Detect if multi-agent format (has 'agents' array)
+    const isMultiAgent = 'agents' in parsedTrace && Array.isArray((parsedTrace as any).agents);
+    const requestBody: AgentAnalysisRequest = isMultiAgent
+      ? { session: parsedTrace as any, analysis_types: analysisTypes as any }
+      : { trace: parsedTrace, analysis_types: analysisTypes as any };
+    
     analyzeAgentTraceStream(
-      { trace: parsedTrace, analysis_types: analysisTypes as any },
+      requestBody,
       (event: AgentAnalysisStreamEvent) => {
         if (event.type === 'start') {
-          setProgress({ current: 0, total: event.total, turnResults: [] });
+          setProgress({ 
+            current: 0, 
+            total: event.total, 
+            turnResults: [],
+            turnTotal: parsedTrace.turns.length,
+            turnCurrent: 0,
+          });
         } else if (event.type === 'progress') {
           setProgress(prev => ({
             ...prev,
@@ -677,7 +829,7 @@ export default function AgentAnalysisPage() {
                     <div
                       key={job.id}
                       className={`${styles.jobItem} ${currentJobId === job.id ? styles.active : ''}`}
-                      onClick={() => setCurrentJobId(job.id)}
+                      onClick={() => resumeJob(job.id)}
                     >
                       <div className={styles.jobItemHeader}>
                         <span className={styles.jobIcon}>
@@ -775,15 +927,28 @@ export default function AgentAnalysisPage() {
               <div className={styles.panelHeader}>
                 <h2>Agent Trace</h2>
                 <div className={styles.exampleButtons}>
-                  <span className={styles.exampleLabel}>Load example:</span>
+                  <span className={styles.exampleLabel}>Single Agent:</span>
                   {Object.entries(EXAMPLE_TRACES).map(([key, example]) => (
                     <button 
                       key={key}
-                      onClick={() => loadExample(key)} 
+                      onClick={() => loadExample(key, false)} 
                       className={styles.exampleBtn}
                       title={getTraceTask(example.trace)}
                     >
                       {example.icon} {example.label}
+                    </button>
+                  ))}
+                </div>
+                <div className={styles.exampleButtons}>
+                  <span className={styles.exampleLabel}>Multi Agent:</span>
+                  {Object.entries(MULTI_AGENT_EXAMPLES).map(([key, example]) => (
+                    <button 
+                      key={key}
+                      onClick={() => loadExample(key, true)} 
+                      className={`${styles.exampleBtn} ${styles.multiAgentBtn}`}
+                      title={example.session.initial_task || 'Multi-agent example'}
+                    >
+                      {example.icon} {example.label.replace('🤝 Multi: ', '')}
                     </button>
                   ))}
                 </div>
@@ -795,23 +960,36 @@ export default function AgentAnalysisPage() {
                   onChange={(e) => handleInputChange(e.target.value)}
                   placeholder={`Paste your agent trace JSON here...
 
-Example format:
 {
+  "agents": [
+    {
+      "id": "my_agent",
+      "name": "MyAgent",
+      "role": "assistant",
+      "tools_available": [
+        { "name": "web_search", "parameters_schema": { "query": "string" } },
+        { "name": "read_file", "parameters_schema": { "path": "string" } }
+      ]
+    }
+  ],
   "turns": [
     {
       "user_message": "What the user asked",
-      "agent_steps": [
-        { "thought": "Agent reasoning..." },
-        { "tool_call": { "name": "tool", "parameters": {} } }
-      ],
-      "agent_response": "Agent's reply to user"
-    },
-    {
-      "user_message": "User follow-up question",
-      "agent_response": "Agent's next reply"
+      "agent_interactions": [
+        {
+          "agent_id": "my_agent",
+          "agent_steps": [
+            { "thought": "I should search for this..." },
+            { "tool_call": { "tool_name": "web_search", "parameters": { "query": "..." }, "result": "...", "latency_ms": 150 } }
+          ],
+          "agent_response": "Here's what I found...",
+          "latency_ms": 500
+        }
+      ]
     }
   ],
-  "success": true,
+  "total_cost": 0.001,
+  "total_latency_ms": 500
   "total_cost": 0.001
 }`}
                 />
@@ -824,7 +1002,9 @@ Example format:
 
                 {parsedTrace && (
                   <div className={styles.parseSuccess}>
-                    ✅ Valid trace: {parsedTrace.turns?.length || 0} turns
+                    ✅ Valid: {parsedTrace.turns?.length || 0} turns
+                    {(parsedTrace as any).agents?.length > 0 && ` • ${(parsedTrace as any).agents.length} agents`}
+                    {(parsedTrace as any).turns?.[0]?.agent_interactions && ' (multi-agent)'}
                   </div>
                 )}
               </div>
@@ -892,6 +1072,63 @@ Example format:
                 )}
               </div>
             </div>
+
+            {/* Live Progress Panel (always visible when analyzing) */}
+            {loading && progress && (
+              <div className={styles.liveProgressPanel}>
+                <div className={styles.liveProgressHeader}>
+                  <span className={styles.liveProgressIcon}>⚡</span>
+                  <span className={styles.liveProgressTitle}>
+                    {currentJobId ? `Background Job #${currentJobId}` : 'Analyzing'}
+                  </span>
+                  {currentJobId && (
+                    <span className={styles.liveProgressBadge}>
+                      Can navigate away
+                    </span>
+                  )}
+                </div>
+                
+                <div className={styles.liveProgressStats}>
+                  <div className={styles.liveProgressStat}>
+                    <span className={styles.statLabel}>Analysis</span>
+                    <span className={styles.statValue}>{progress.currentAnalysis || 'Starting...'}</span>
+                  </div>
+                  <div className={styles.liveProgressStat}>
+                    <span className={styles.statLabel}>Progress</span>
+                    <span className={styles.statValue}>{progress.current}/{progress.total} steps</span>
+                  </div>
+                  {progress.turnTotal && (
+                    <div className={styles.liveProgressStat}>
+                      <span className={styles.statLabel}>Turns</span>
+                      <span className={styles.statValue}>{progress.turnCurrent || 0}/{progress.turnTotal}</span>
+                    </div>
+                  )}
+                </div>
+                
+                <div className={styles.liveProgressBar}>
+                  <div 
+                    className={styles.liveProgressFill}
+                    style={{ width: `${((progress.turnCurrent || 0) / (progress.turnTotal || 1)) * 100}%` }}
+                  />
+                </div>
+                
+                {progress.turnResults && progress.turnResults.length > 0 && (
+                  <div className={styles.liveProgressTurns}>
+                    {progress.turnResults.map((result, idx) => (
+                      <div 
+                        key={idx} 
+                        className={`${styles.liveProgressTurn} ${result.is_bad ? styles.turnBad : styles.turnGood}`}
+                      >
+                        <span>{result.is_bad ? '❌' : '✅'}</span>
+                        <span>Turn {result.step_index + 1}</span>
+                        <span className={styles.turnType}>{result.detection_type.toUpperCase()}</span>
+                        <span className={styles.turnConf}>{(result.confidence * 100).toFixed(0)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Results */}
             {parsedTrace && (results || loading) && (
