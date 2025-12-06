@@ -34,6 +34,8 @@ class DatasetSummary(BaseModel):
     conversation_count: int = 0
     success: Optional[bool] = None
     total_cost: Optional[float] = None
+    overall_score: Optional[float] = None
+    agent_scores: Optional[dict] = None
     
     class Config:
         from_attributes = True

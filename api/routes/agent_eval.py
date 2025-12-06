@@ -25,6 +25,8 @@ from ..database import (
     AgentTraceDB, AgentTurnDB, AnalysisJobDB,
 )
 
+from ..schemas import DatasetSummary
+
 from reask import (
     AgentTrace, AgentStep, ToolCall,
     TrajectoryAnalyzer, ToolEvaluator,
@@ -502,10 +504,67 @@ def compute_per_agent_scores(
         # ===========================================
         # REASONING SCORE
         # ===========================================
-        reasoning = None
-        if metrics.get('reasoning_steps', 0) > 0:
-            # Score based on reasoning depth
-            reasoning = min(1.0, metrics['reasoning_steps'] / max(metrics.get('interactions_count', 1), 1))
+        reasoning_data = None
+        reasoning_score = None
+        thoughts_list = metrics.get('thoughts', [])
+        reasoning_steps = metrics.get('reasoning_steps', 0)
+        
+        if reasoning_steps > 0:
+            # Calculate reasoning depth (how many thoughts per interaction)
+            interactions_count = max(metrics.get('interactions_count', 1), 1)
+            reasoning_depth = min(1.0, reasoning_steps / interactions_count)
+            
+            # Evaluate thought quality (simple heuristics)
+            thought_evaluations = []
+            quality_scores = []
+            
+            for i, thought_info in enumerate(thoughts_list):
+                thought_text = thought_info.get('thought', '')
+                turn_idx = thought_info.get('turn_index', 0)
+                
+                # Simple quality heuristics
+                is_clear = len(thought_text) > 20  # Reasonable length
+                is_structured = any(w in thought_text.lower() for w in ['because', 'therefore', 'so', 'need to', 'should', 'will', 'first', 'then', 'next'])
+                is_relevant = not any(w in thought_text.lower() for w in ['not sure', 'maybe', 'i dont know', "don't know"])
+                
+                # Individual thought score
+                thought_score = sum([is_clear * 0.4, is_structured * 0.35, is_relevant * 0.25])
+                quality_scores.append(thought_score)
+                
+                thought_evaluations.append({
+                    'turn_index': turn_idx,
+                    'thought_preview': thought_text[:80] + ('...' if len(thought_text) > 80 else ''),
+                    'is_clear': is_clear,
+                    'is_structured': is_structured,
+                    'score': round(thought_score, 2),
+                })
+            
+            # Overall quality score
+            avg_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0.7
+            
+            # Combined reasoning score (depth + quality)
+            reasoning_score = (reasoning_depth * 0.4 + avg_quality * 0.6)
+            
+            # Generate assessment explanation
+            if reasoning_score >= 0.8:
+                assessment = "Strong reasoning with clear, structured thoughts"
+            elif reasoning_score >= 0.6:
+                assessment = "Good reasoning but could be more structured"
+            elif reasoning_score >= 0.4:
+                assessment = "Reasoning present but lacks clarity or depth"
+            else:
+                assessment = "Weak reasoning - thoughts are unclear or too brief"
+            
+            reasoning_data = {
+                'quality_score': round(reasoning_score, 2),
+                'reasoning_depth': round(reasoning_depth, 2),
+                'avg_thought_quality': round(avg_quality, 2),
+                'total_thoughts': reasoning_steps,
+                'clear_thoughts': sum(1 for t in thought_evaluations if t['is_clear']),
+                'structured_thoughts': sum(1 for t in thought_evaluations if t['is_structured']),
+                'assessment': assessment,
+                'thoughts': thought_evaluations[:5],  # Limit to first 5 for display
+            }
         
         # ===========================================
         # HANDOFF SCORE
@@ -530,8 +589,8 @@ def compute_per_agent_scores(
             scores.append(self_correction_data['self_awareness_score'])
         if response_quality_data:
             scores.append(response_quality_data['quality_score'])
-        if reasoning is not None:
-            scores.append(reasoning)
+        if reasoning_score is not None:
+            scores.append(reasoning_score)
         if handoff is not None:
             scores.append(handoff)
         
@@ -547,8 +606,7 @@ def compute_per_agent_scores(
             'tool_use': tool_use_data,
             'self_correction': self_correction_data,
             'response_quality': response_quality_data,
-            # Simple scores
-            'reasoning': round(reasoning, 2) if reasoning is not None else None,
+            'reasoning': reasoning_data,
             'handoff': handoff_data,
             # Metadata
             'interactions_count': metrics.get('interactions_count', 0),
@@ -1699,7 +1757,9 @@ async def get_agent_trace(trace_id: int, db: Session = Depends(get_db)):
             results['self_correction'] = latest_analysis.self_correction_result_json
         if hasattr(latest_analysis, 'per_agent_scores_json') and latest_analysis.per_agent_scores_json:
             results['per_agent_scores'] = latest_analysis.per_agent_scores_json
-        if hasattr(latest_analysis, 'coordination_score') and latest_analysis.coordination_score:
+        
+        # Only show coordination score for multi-agent traces
+        if len(agents) > 1 and hasattr(latest_analysis, 'coordination_score') and latest_analysis.coordination_score:
             results['coordination_score'] = latest_analysis.coordination_score
     
     console.print(f"  [green]✓[/] Found trace with {len(turns)} turns, {len(agents)} agents")
@@ -1707,6 +1767,7 @@ async def get_agent_trace(trace_id: int, db: Session = Depends(get_db)):
     return {
         'id': trace.id,
         'name': trace.name,
+        'file_type': 'json',  # Default since not in DB yet
         'created_at': trace.created_at.isoformat(),
         'trace': {
             'agents': agents,
@@ -2140,22 +2201,35 @@ def run_background_analysis(analysis_id: int, resume_from: int = 0):
             analysis.trajectory_result_json = json.dumps(traj_result)
             db.commit()
         
-        # Run tool evaluation
+        # Run tool evaluation (only if tools are used/available)
+        # Run tool evaluation (only if tools are available in the library)
         if 'tools' in analysis_types:
-            analysis.current_step += 1
-            analysis.current_analysis = "tools"
-            db.commit()
+            # Check if any agent has tools available in their definition
+            has_available_tools = False
+            for agent in db_trace.agents:
+                if agent.tools_available_json and len(agent.tools_available_json) > 0:
+                    has_available_tools = True
+                    break
             
-            evaluator = ToolEvaluator()
-            efficiency, tool_results = evaluator.evaluate_tool_chain(trace)
-            tools_result = {
-                'efficiency': efficiency,
-                'results': [{'signal': r.signal.value, 'tool_name': r.tool_name, 'confidence': r.confidence, 'reason': r.reason} for r in tool_results],
-                'total_calls': len(trace.tool_calls),
-            }
-            results['tools'] = tools_result
-            analysis.tools_result_json = json.dumps(tools_result)
-            db.commit()
+            if has_available_tools:
+                analysis.current_step += 1
+                analysis.current_analysis = "tools"
+                db.commit()
+                
+                evaluator = ToolEvaluator()
+                efficiency, tool_results = evaluator.evaluate_tool_chain(trace)
+                tools_result = {
+                    'efficiency': efficiency,
+                    'results': [{'signal': r.signal.value, 'tool_name': r.tool_name, 'confidence': r.confidence, 'reason': r.reason} for r in tool_results],
+                    'total_calls': len(trace.tool_calls),
+                }
+                results['tools'] = tools_result
+                analysis.tools_result_json = json.dumps(tools_result)
+                db.commit()
+            else:
+                # Skip tool analysis if no tools available in library
+                console.print("    [dim]Skipping tool analysis: No tools in agent library[/]")
+                # We don't add 'tools' to results, so it won't be counted in overall score
         
         # Run self-correction detection
         if 'self_correction' in analysis_types:
@@ -2330,10 +2404,45 @@ async def start_analysis_job(request: StartJobRequest, db: Session = Depends(get
     _background_tasks[analysis.id] = thread
     
     return {
-        'job_id': analysis.id,
-        'trace_id': db_trace.id,
-        'status': 'pending',
+        "job_id": analysis.id,
+        "status": "pending",
+        "message": "Analysis job started in background"
     }
+
+
+@router.get("/datasets", response_model=List[DatasetSummary])
+async def list_datasets(db: Session = Depends(get_db)):
+    """List all datasets with their latest analysis scores"""
+    # Use AgentTraceDB which is alias for AgentSession/Dataset
+    datasets = db.query(AgentTraceDB).order_by(AgentTraceDB.created_at.desc()).all()
+    
+    results = []
+    for d in datasets:
+        # Get latest completed analysis
+        latest_analysis = db.query(AnalysisJobDB).filter(
+            AnalysisJobDB.dataset_id == d.id,
+            AnalysisJobDB.status == 'completed'
+        ).order_by(AnalysisJobDB.completed_at.desc()).first()
+        
+        # Get agent scores if available
+        agent_scores = None
+        if latest_analysis and hasattr(latest_analysis, 'per_agent_scores_json'):
+            agent_scores = latest_analysis.per_agent_scores_json
+            
+        summary = DatasetSummary(
+            id=d.id,
+            name=d.name,
+            task=d.task,
+            created_at=d.created_at,
+            conversation_count=len(d.conversations) if d.conversations else 0,
+            success=d.success,
+            total_cost=d.total_cost,
+            overall_score=latest_analysis.overall_score if latest_analysis else None,
+            agent_scores=agent_scores
+        )
+        results.append(summary)
+    
+    return results
 
 
 @router.post("/agent/jobs/{job_id}/retry")
@@ -2448,4 +2557,82 @@ async def delete_job(job_id: int, db: Session = Depends(get_db)):
     db.delete(job)
     db.commit()
     return {'message': 'Job deleted'}
+
+
+@router.get("/datasets/{dataset_id}")
+async def get_dataset(dataset_id: int, db: Session = Depends(get_db)):
+    """Get a specific dataset with stats and conversations (transformed for frontend)"""
+    # Get the trace data
+    trace_data = await get_agent_trace(dataset_id, db)
+    
+    # Extract stats
+    stats = None
+    if trace_data.get('results') and trace_data['results'].get('conversation'):
+        stats = trace_data['results']['conversation']
+    
+    # Transform turns to conversations
+    conversations = []
+    turns = trace_data['trace']['turns']
+    
+    for i, turn in enumerate(turns):
+        messages = []
+        msg_id_counter = 1
+        
+        # User message
+        if turn['user_message']:
+            messages.append({
+                'id': msg_id_counter,
+                'index': 0,
+                'role': 'user',
+                'content': turn['user_message']
+            })
+            msg_id_counter += 1
+            
+        # Agent messages
+        for j, interaction in enumerate(turn['agent_interactions']):
+            if interaction.get('agent_response'):
+                # Find eval result for this turn if available
+                eval_result = None
+                if stats and 'results' in stats:
+                    # stats['results'] is a list of turn results
+                    # We need to match by turn index
+                    turn_res = next((r for r in stats['results'] if r['step_index'] == turn['turn_index']), None)
+                    if turn_res:
+                         eval_result = {
+                             'id': turn_res['step_index'],
+                             'message_id': msg_id_counter,
+                             'is_bad': turn_res['is_bad'],
+                             'detection_type': turn_res['detection_type'],
+                             'confidence': turn_res['confidence'],
+                             'reason': turn_res['reason']
+                         }
+
+                messages.append({
+                    'id': msg_id_counter,
+                    'index': j + 1,
+                    'role': 'assistant',
+                    'content': interaction['agent_response'],
+                    'eval_result': eval_result
+                })
+                msg_id_counter += 1
+        
+        conversations.append({
+            'id': i,
+            'conversation_id': str(turn['turn_index']),
+            'messages': messages
+        })
+        
+    return {
+        'id': trace_data['id'],
+        'name': trace_data['name'],
+        'file_type': trace_data['file_type'],
+        'uploaded_at': trace_data['created_at'],
+        'evaluated': trace_data['results'].get('overall_score') is not None,
+        'conversation_count': len(conversations),
+        'message_count': sum(len(c['messages']) for c in conversations),
+        'conversations': conversations,
+        'stats': stats,
+        'overall_score': trace_data['results'].get('overall_score'),
+        'agent_scores': trace_data['results'].get('per_agent_scores')
+    }
 

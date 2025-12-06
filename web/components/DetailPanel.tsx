@@ -18,6 +18,26 @@ import {
   AgentStepInput,
 } from '@/lib/api';
 
+// Local interface for new reasoning data structure
+interface ReasoningThought {
+  turn_index: number;
+  thought_preview: string;
+  is_clear: boolean;
+  is_structured: boolean;
+  score: number;
+}
+
+interface ReasoningData {
+  quality_score: number;
+  reasoning_depth: number;
+  avg_thought_quality: number;
+  total_thoughts: number;
+  clear_thoughts: number;
+  structured_thoughts: number;
+  assessment: string;
+  thoughts: ReasoningThought[];
+}
+
 interface DetailPanelProps {
   trace: AgentTraceInput;
   results?: AgentAnalysisResults;
@@ -28,11 +48,11 @@ export default function DetailPanel({ trace, results, selection }: DetailPanelPr
   if (selection.type === 'global') {
     return <GlobalView trace={trace} results={results} />;
   }
-  
+
   if (selection.type === 'agent') {
     return <AgentView trace={trace} results={results} agentId={selection.agentId} />;
   }
-  
+
   if (selection.type === 'turn') {
     return <TurnView trace={trace} results={results} turnIndex={selection.turnIndex} agentId={selection.agentId} />;
   }
@@ -79,9 +99,9 @@ function GlobalView({ trace, results }: { trace: AgentTraceInput; results?: Agen
           </div>
         </div>
         <div className={styles.scoreBar}>
-          <div 
+          <div
             className={styles.scoreBarFill}
-            style={{ 
+            style={{
               width: `${results.overall_score * 100}%`,
               background: getScoreColor(results.overall_score)
             }}
@@ -170,7 +190,7 @@ function GlobalView({ trace, results }: { trace: AgentTraceInput; results?: Agen
                   </div>
                   <div className={styles.agentSummaryScore}>
                     <div className={styles.miniBar}>
-                      <div 
+                      <div
                         className={styles.miniBarFill}
                         style={{ width: `${scores.overall * 100}%`, background: getScoreColor(scores.overall) }}
                       />
@@ -242,9 +262,9 @@ function AgentView({ trace, results, agentId }: { trace: AgentTraceInput; result
               <span className={styles.agentScorePercent}>%</span>
             </div>
             <div className={styles.agentScoreBar}>
-              <div 
+              <div
                 className={styles.agentScoreBarFill}
-                style={{ 
+                style={{
                   width: `${agentScore.overall * 100}%`,
                   background: getScoreColor(agentScore.overall)
                 }}
@@ -256,14 +276,14 @@ function AgentView({ trace, results, agentId }: { trace: AgentTraceInput; result
           <div className={styles.metricCardsGrid}>
             {/* Tool Use */}
             {agentScore.tool_use && (
-              <div 
+              <div
                 className={`${styles.metricCardExpand} ${expandedMetric === 'tool_use' ? styles.expanded : ''}`}
                 onClick={() => toggleMetric('tool_use')}
               >
                 <div className={styles.metricCardHeader}>
                   <span className={styles.metricCardIcon}>🔧</span>
                   <span className={styles.metricCardTitle}>Tool Use</span>
-                  <span 
+                  <span
                     className={styles.metricCardScore}
                     style={{ color: getScoreColor(agentScore.tool_use.efficiency) }}
                   >
@@ -307,14 +327,14 @@ function AgentView({ trace, results, agentId }: { trace: AgentTraceInput; result
 
             {/* Self Correction */}
             {agentScore.self_correction && (
-              <div 
+              <div
                 className={`${styles.metricCardExpand} ${expandedMetric === 'self_correction' ? styles.expanded : ''}`}
                 onClick={() => toggleMetric('self_correction')}
               >
                 <div className={styles.metricCardHeader}>
                   <span className={styles.metricCardIcon}>🔁</span>
                   <span className={styles.metricCardTitle}>Self-Correction</span>
-                  <span 
+                  <span
                     className={styles.metricCardScore}
                     style={{ color: getScoreColor(agentScore.self_correction.self_awareness_score) }}
                   >
@@ -354,14 +374,14 @@ function AgentView({ trace, results, agentId }: { trace: AgentTraceInput; result
 
             {/* Response Quality */}
             {agentScore.response_quality && (
-              <div 
+              <div
                 className={`${styles.metricCardExpand} ${expandedMetric === 'response_quality' ? styles.expanded : ''}`}
                 onClick={() => toggleMetric('response_quality')}
               >
                 <div className={styles.metricCardHeader}>
                   <span className={styles.metricCardIcon}>💬</span>
                   <span className={styles.metricCardTitle}>Response Quality</span>
-                  <span 
+                  <span
                     className={styles.metricCardScore}
                     style={{ color: getScoreColor(agentScore.response_quality.quality_score) }}
                   >
@@ -404,29 +424,107 @@ function AgentView({ trace, results, agentId }: { trace: AgentTraceInput; result
             )}
 
             {/* Reasoning */}
-            {agentScore.reasoning != null && (
-              <div className={styles.metricCardSimple}>
-                <span className={styles.metricCardIcon}>🧠</span>
-                <span className={styles.metricCardTitle}>Reasoning</span>
-                <span 
-                  className={styles.metricCardScore}
-                  style={{ color: getScoreColor(agentScore.reasoning) }}
-                >
-                  {(agentScore.reasoning * 100).toFixed(0)}%
-                </span>
+            {agentScore.reasoning && (
+              <div
+                className={`${styles.metricCardExpand} ${expandedMetric === 'reasoning' ? styles.expanded : ''}`}
+                onClick={() => toggleMetric('reasoning')}
+              >
+                {/* Cast to unknown first then ReasoningData because API types say it's a number */}
+                {(() => {
+                  const reasoningData = agentScore.reasoning as unknown as ReasoningData;
+                  // Handle case where it might still be a number (backward compatibility)
+                  if (typeof agentScore.reasoning === 'number') {
+                    return (
+                      <div className={styles.metricCardSimple}>
+                        <span className={styles.metricCardIcon}>🧠</span>
+                        <span className={styles.metricCardTitle}>Reasoning</span>
+                        <span
+                          className={styles.metricCardScore}
+                          style={{ color: getScoreColor(agentScore.reasoning) }}
+                        >
+                          {(agentScore.reasoning * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <>
+                      <div className={styles.metricCardHeader}>
+                        <span className={styles.metricCardIcon}>🧠</span>
+                        <span className={styles.metricCardTitle}>Reasoning</span>
+                        <span
+                          className={styles.metricCardScore}
+                          style={{ color: getScoreColor(reasoningData.quality_score) }}
+                        >
+                          {(reasoningData.quality_score * 100).toFixed(0)}%
+                        </span>
+                        <span className={styles.expandArrow}>{expandedMetric === 'reasoning' ? '▼' : '▶'}</span>
+                      </div>
+                      {expandedMetric === 'reasoning' && (
+                        <div className={styles.metricCardBody}>
+                          {/* Assessment */}
+                          <div className={styles.assessmentBox}>
+                            {reasoningData.assessment}
+                          </div>
+                          <div className={styles.metricStats}>
+                            <div className={styles.metricStat}>
+                              <span>Total Thoughts</span>
+                              <span>{reasoningData.total_thoughts}</span>
+                            </div>
+                            <div className={styles.metricStat}>
+                              <span>Reasoning Depth</span>
+                              <span className={styles.good}>{(reasoningData.reasoning_depth * 100).toFixed(0)}%</span>
+                            </div>
+                            <div className={styles.metricStat}>
+                              <span>Clear</span>
+                              <span className={styles.good}>{reasoningData.clear_thoughts}</span>
+                            </div>
+                            <div className={styles.metricStat}>
+                              <span>Structured</span>
+                              <span className={styles.good}>{reasoningData.structured_thoughts}</span>
+                            </div>
+                          </div>
+                          {reasoningData.thoughts && reasoningData.thoughts.length > 0 && (
+                            <div className={styles.metricResults}>
+                              <div className={styles.thoughtsHeader}>Thought Samples:</div>
+                              {reasoningData.thoughts.map((t, i) => (
+                                <div key={i} className={styles.thoughtResultItem}>
+                                  <div className={styles.thoughtHeader}>
+                                    <span className={styles.turnLabel}>Turn {t.turn_index + 1}</span>
+                                    <span className={`${styles.signal} ${t.score >= 0.6 ? styles.good : styles.bad}`}>
+                                      {(t.score * 100).toFixed(0)}%
+                                    </span>
+                                  </div>
+                                  <p className={styles.thoughtPreview}>{t.thought_preview}</p>
+                                  <div className={styles.thoughtTags}>
+                                    {t.is_clear && <span className={styles.thoughtTag}>✓ Clear</span>}
+                                    {t.is_structured && <span className={styles.thoughtTag}>✓ Structured</span>}
+                                    {!t.is_clear && <span className={`${styles.thoughtTag} ${styles.thoughtTagBad}`}>Brief</span>}
+                                    {!t.is_structured && <span className={`${styles.thoughtTag} ${styles.thoughtTagBad}`}>Unstructured</span>}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             )}
 
             {/* Handoff */}
             {agentScore.handoff && (
-              <div 
+              <div
                 className={`${styles.metricCardExpand} ${expandedMetric === 'handoff' ? styles.expanded : ''}`}
                 onClick={() => toggleMetric('handoff')}
               >
                 <div className={styles.metricCardHeader}>
                   <span className={styles.metricCardIcon}>🔄</span>
                   <span className={styles.metricCardTitle}>Handoff</span>
-                  <span 
+                  <span
                     className={styles.metricCardScore}
                     style={{ color: getScoreColor(agentScore.handoff.quality_score) }}
                   >
@@ -475,7 +573,7 @@ function AgentView({ trace, results, agentId }: { trace: AgentTraceInput; result
                 <div className={styles.metricCardSimple}>
                   <span className={styles.metricCardIcon}>🔧</span>
                   <span className={styles.metricCardTitle}>Tool Use</span>
-                  <span 
+                  <span
                     className={styles.metricCardScore}
                     style={{ color: getScoreColor(results.tools.efficiency) }}
                   >
@@ -487,7 +585,7 @@ function AgentView({ trace, results, agentId }: { trace: AgentTraceInput; result
                 <div className={styles.metricCardSimple}>
                   <span className={styles.metricCardIcon}>🔁</span>
                   <span className={styles.metricCardTitle}>Self-Correction</span>
-                  <span 
+                  <span
                     className={styles.metricCardScore}
                     style={{ color: getScoreColor(results.self_correction.self_awareness_score) }}
                   >
@@ -499,7 +597,7 @@ function AgentView({ trace, results, agentId }: { trace: AgentTraceInput; result
                 <div className={styles.metricCardSimple}>
                   <span className={styles.metricCardIcon}>💬</span>
                   <span className={styles.metricCardTitle}>Response Quality</span>
-                  <span 
+                  <span
                     className={styles.metricCardScore}
                     style={{ color: getScoreColor(results.conversation.good_responses / results.conversation.total_responses) }}
                   >
@@ -575,9 +673,9 @@ function AgentView({ trace, results, agentId }: { trace: AgentTraceInput; result
 // ============================================
 // TURN VIEW
 // ============================================
-function TurnView({ trace, results, turnIndex, agentId }: { 
-  trace: AgentTraceInput; 
-  results?: AgentAnalysisResults; 
+function TurnView({ trace, results, turnIndex, agentId }: {
+  trace: AgentTraceInput;
+  results?: AgentAnalysisResults;
   turnIndex: number;
   agentId?: string;
 }) {
@@ -620,7 +718,7 @@ function TurnView({ trace, results, turnIndex, agentId }: {
         <div className={styles.turnHeader}>
           <span className={styles.turnNumber}>Turn {turnIndex + 1}</span>
           {turnResult && (
-            <span 
+            <span
               className={styles.detectionBadge}
               style={{ background: getScoreColor(turnResult.confidence, turnResult.is_bad) }}
             >
@@ -635,7 +733,7 @@ function TurnView({ trace, results, turnIndex, agentId }: {
         <div className={styles.scoreBreakdown}>
           <div className={styles.breakdownHeader}>
             <span className={styles.breakdownLabel}>Confidence</span>
-            <span 
+            <span
               className={styles.breakdownValue}
               style={{ color: getScoreColor(turnResult.confidence, turnResult.is_bad) }}
             >
@@ -643,9 +741,9 @@ function TurnView({ trace, results, turnIndex, agentId }: {
             </span>
           </div>
           <div className={styles.breakdownBar}>
-            <div 
+            <div
               className={styles.breakdownFill}
-              style={{ 
+              style={{
                 width: `${turnResult.confidence * 100}%`,
                 background: getScoreColor(turnResult.confidence, turnResult.is_bad)
               }}
@@ -668,14 +766,14 @@ function TurnView({ trace, results, turnIndex, agentId }: {
       {/* Agent Interactions */}
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>🤖 Agent Response{interactions.length > 1 ? 's' : ''}</h3>
-        
+
         {interactions.map((interaction, idx) => {
           const agentDef = trace.agents?.find(a => a.id === interaction.agent_id);
           const isFiltered = agentId && interaction.agent_id !== agentId;
-          
+
           return (
-            <div 
-              key={idx} 
+            <div
+              key={idx}
               className={`${styles.interactionBlock} ${isFiltered ? styles.dimmed : ''}`}
             >
               {interactions.length > 1 && (
@@ -696,7 +794,7 @@ function TurnView({ trace, results, turnIndex, agentId }: {
                     <span>🧠 Reasoning ({interaction.agent_steps.length} steps)</span>
                   </div>
                   {interaction.agent_steps.map((step, stepIdx) => (
-                    <StepDetail 
+                    <StepDetail
                       key={stepIdx}
                       step={step}
                       index={stepIdx}
@@ -724,10 +822,10 @@ function TurnView({ trace, results, turnIndex, agentId }: {
 // ============================================
 // HELPER COMPONENTS
 // ============================================
-function MetricCard({ icon, label, value, sublabel, color }: { 
-  icon: string; 
-  label: string; 
-  value: string; 
+function MetricCard({ icon, label, value, sublabel, color }: {
+  icon: string;
+  label: string;
+  value: string;
   sublabel?: string;
   color?: string;
 }) {
@@ -767,7 +865,7 @@ function DetectionBreakdown({ result }: { result: ConversationAnalysisResult }) 
             {method.label}
           </span>
           <div className={styles.detectionBarContainer}>
-            <div 
+            <div
               className={styles.detectionBar}
               style={{ width: `${(method.count / max) * 100}%`, background: method.color }}
             />
@@ -779,7 +877,7 @@ function DetectionBreakdown({ result }: { result: ConversationAnalysisResult }) 
   );
 }
 
-function StepDetail({ step, index, expanded, onToggle }: { 
+function StepDetail({ step, index, expanded, onToggle }: {
   step: AgentStepInput | any;
   index: number;
   expanded: boolean;

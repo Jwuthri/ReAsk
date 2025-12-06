@@ -53,14 +53,14 @@ const EXAMPLE_TRACES: Record<string, { trace: AgentTraceInput; label: string; ic
           user_message: "Can you find and fix the bug in the authentication module?",
           agent_steps: [
             { thought: "I need to look at the auth files first" },
-            { tool_call: { name: "read_file", parameters: { path: "auth/login.py" }, result: "def login(user, password): ...", latency_ms: 45 } },
+            { tool_call: { tool_name: "read_file", parameters: { path: "auth/login.py" }, result: "def login(user, password): ...", latency_ms: 45 } },
           ],
           agent_response: "I found the issue - the password comparison is case sensitive. I've fixed it.",
         },
         {
           user_message: "Great, can you verify the fix works?",
           agent_steps: [
-            { thought: "Let me run the tests", tool_call: { name: "run_tests", parameters: { suite: "auth" }, result: "All tests passed", latency_ms: 1200 } },
+            { thought: "Let me run the tests", tool_call: { tool_name: "run_tests", parameters: { suite: "auth" }, result: "All tests passed", latency_ms: 1200 } },
           ],
           agent_response: "All authentication tests pass now. The bug is fixed!",
         },
@@ -114,7 +114,7 @@ const EXAMPLE_TRACES: Record<string, { trace: AgentTraceInput; label: string; ic
         {
           user_message: "Can you read the README and tell me how to install?",
           agent_steps: [
-            { tool_call: { name: "read_file", parameters: { path: "README.md" }, result: "# MyApp\n\nRun `npm install` to install dependencies.", latency_ms: 32 } },
+            { tool_call: { tool_name: "read_file", parameters: { path: "README.md" }, result: "# MyApp\n\nRun `npm install` to install dependencies.", latency_ms: 32 } },
           ],
           agent_response: "According to the README, you need to run `pip install myapp` to install.",  // HALLUCINATION!
         },
@@ -142,8 +142,8 @@ const EXAMPLE_TRACES: Record<string, { trace: AgentTraceInput; label: string; ic
         {
           user_message: "Deploy the application to production",
           agent_steps: [
-            { tool_call: { name: "run_build", parameters: { env: "production" }, result: "Build successful", latency_ms: 5000 } },
-            { tool_call: { name: "deploy", parameters: { env: "production" }, error: "Auth failed", latency_ms: 200 } },
+            { tool_call: { tool_name: "run_build", parameters: { env: "production" }, result: "Build successful", latency_ms: 5000 } },
+            { tool_call: { tool_name: "deploy", parameters: { env: "production" }, error: "Auth failed", latency_ms: 200 } },
           ],
           agent_response: "Build succeeded but deployment failed - auth error.",
         },
@@ -151,7 +151,7 @@ const EXAMPLE_TRACES: Record<string, { trace: AgentTraceInput; label: string; ic
           user_message: "Can you notify the admin?",
           agent_steps: [
             // Using a tool NOT in tools_available - this should be flagged!
-            { tool_call: { name: "send_email", parameters: { to: "admin@company.com" }, error: "Tool not available" } },
+            { tool_call: { tool_name: "send_email", parameters: { to: "admin@company.com" }, error: "Tool not available" } },
           ],
           agent_response: "I tried to email admin but that tool isn't available to me.",
         },
@@ -176,7 +176,7 @@ const EXAMPLE_TRACES: Record<string, { trace: AgentTraceInput; label: string; ic
       turns: [
         {
           user_message: "Add JWT authentication to the API",
-          agent_steps: [{ tool_call: { name: "run_command", parameters: { cmd: "pip install pyjwt" }, result: "Installed", latency_ms: 800 } }],
+          agent_steps: [{ tool_call: { tool_name: "run_command", parameters: { cmd: "pip install pyjwt" }, result: "Installed", latency_ms: 800 } }],
           agent_response: "I've installed PyJWT. Starting the implementation.",
         },
         { user_message: "Great, continue with the JWT setup", agent_response: "I noticed the logging could be improved, so I'm refactoring that first." },  // DRIFT!
@@ -1058,9 +1058,9 @@ export default function AgentAnalysisPage() {
     }
 
     // Streaming mode - run inline
-    // Detect if multi-agent format (has 'agents' array)
-    const isMultiAgent = 'agents' in parsedTrace && Array.isArray((parsedTrace as any).agents);
-    const requestBody: AgentAnalysisRequest = isMultiAgent
+    // Detect if multi-agent format: turns have agent_interactions (not just agent_steps)
+    const hasAgentInteractions = parsedTrace.turns?.some((t: any) => t.agent_interactions?.length > 0);
+    const requestBody: AgentAnalysisRequest = hasAgentInteractions
       ? { session: parsedTrace as any, analysis_types: analysisTypes as any }
       : { trace: parsedTrace, analysis_types: analysisTypes as any };
 
