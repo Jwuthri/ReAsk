@@ -688,7 +688,7 @@ export default function AgentAnalysisPage() {
 
   const handleDelete = async (id: number, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm('Delete this trace?')) return;
+    // if (!confirm('Delete this trace?')) return;
     
     try {
       await deleteAgentTrace(id);
@@ -714,9 +714,9 @@ export default function AgentAnalysisPage() {
     
     let analysisTypes: string[];
     if (selectedAnalysis === 'full_all') {
-      analysisTypes = ['conversation', 'trajectory', 'tools', 'self_correction', 'intent_drift'];
+      analysisTypes = ['conversation', 'trajectory', 'tools', 'self_correction'];
     } else if (selectedAnalysis === 'full_agent') {
-      analysisTypes = ['trajectory', 'tools', 'self_correction', 'intent_drift'];
+      analysisTypes = ['trajectory', 'tools', 'self_correction'];
     } else {
       analysisTypes = [selectedAnalysis];
     }
@@ -1051,11 +1051,11 @@ export default function AgentAnalysisPage() {
                     )}
                   </button>
 
-                  {results && currentTraceId && (
+                  {/* {results && currentTraceId && (
                     <span className={styles.savedIndicator}>
                       ✅ Saved
                     </span>
-                  )}
+                  )} */}
                   
                   {currentJobId && (
                     <span className={styles.jobIndicator}>

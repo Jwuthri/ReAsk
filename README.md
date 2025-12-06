@@ -51,7 +51,7 @@ print(result)
 from reask import (
     AgentTrace, AgentStep, ToolCall,
     TrajectoryAnalyzer, ToolEvaluator,
-    SelfCorrectionDetector, IntentDriftMeter,
+    SelfCorrectionDetector,
 )
 
 # Create an agent trace
@@ -75,10 +75,6 @@ result = analyzer.analyze(trace)
 print(result)
 # TrajectoryEval(✅ optimal, eff=0.95, conf=0.92)
 
-# Check for intent drift
-drift_meter = IntentDriftMeter()
-drift = drift_meter.analyze(trace)
-print(f"Max drift: {drift.drift_score:.2f}")
 ```
 
 ## Agent Benchmarking
@@ -168,15 +164,6 @@ print(f"Stuck in loop: {result.loops_before_fix > 3}")
 
 Track if agents stay on task:
 
-```python
-from reask import IntentDriftMeter
-
-meter = IntentDriftMeter(
-    drift_warning_threshold=0.35,
-    drift_critical_threshold=0.60,
-)
-
-result = meter.analyze(trace)
 
 # Real-time alerts
 for step in new_steps:
@@ -256,10 +243,6 @@ class SelfCorrectionResult:
     self_awareness_score: float
     correction_efficiency: float
 
-class IntentDriftResult:
-    drift_score: float
-    drift_history: List[float]
-    is_legitimate: bool
 ```
 
 ## Examples

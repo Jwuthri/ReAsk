@@ -8,7 +8,6 @@ export type AnalysisType =
   | 'trajectory'      // Agent Trajectory Analysis
   | 'tools'           // Tool Use Quality
   | 'self_correction' // Self-Correction Detection
-  | 'intent_drift'    // Intent Drift Meter
   | 'full_agent'      // All agent analyses combined
   | 'full_all';       // Everything (conversation + agent)
 
@@ -59,22 +58,13 @@ const ANALYSIS_OPTIONS: AnalysisOption[] = [
     features: ['Error Detection', 'Recovery Success', 'Loop Detection', 'Awareness Score'],
   },
   {
-    id: 'intent_drift',
-    name: 'Intent Drift',
-    description: 'Measure task alignment over time',
-    icon: '🎯',
-    badge: 'NEW',
-    category: 'agent',
-    features: ['Drift Score per Step', 'Scope Creep Detection', 'Tangent Detection', 'Real-time Alerts'],
-  },
-  {
     id: 'full_all',
     name: 'Full Analysis',
     description: 'Run all evaluations (conversation + agent)',
     icon: '🚀',
     badge: 'RECOMMENDED',
     category: 'all',
-    features: ['CCM/RDM/Hallucination', 'Trajectory Analysis', 'Tool Quality', 'Self-Correction', 'Intent Drift'],
+    features: ['CCM/RDM/Hallucination', 'Trajectory Analysis', 'Tool Quality', 'Self-Correction'],
   },
 ];
 

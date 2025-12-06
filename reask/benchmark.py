@@ -15,7 +15,6 @@ from .agent_models import (
 from .trajectory import TrajectoryAnalyzer
 from .tool_eval import ToolEvaluator
 from .self_correction import SelfCorrectionDetector
-from .intent_drift import IntentDriftMeter
 
 load_dotenv()
 
@@ -63,7 +62,6 @@ class BenchmarkRun:
             "trajectory_score": self.result.trajectory_score,
             "tool_accuracy": self.result.tool_accuracy,
             "self_correction_score": self.result.self_correction_score,
-            "intent_drift": self.result.intent_drift,
             "total_cost": self.result.total_cost,
             "total_latency_ms": self.result.total_latency_ms,
             "step_count": self.result.step_count,
@@ -151,7 +149,6 @@ class AgentBenchmark:
         self.trajectory_analyzer = TrajectoryAnalyzer(self.client, model)
         self.tool_evaluator = ToolEvaluator(self.client, model, available_tools)
         self.self_correction_detector = SelfCorrectionDetector(self.client, model)
-        self.intent_drift_meter = IntentDriftMeter(self.client, model)
         
         # Storage
         self.runs: List[BenchmarkRun] = []
@@ -171,8 +168,6 @@ class AgentBenchmark:
         trajectory_result = self.trajectory_analyzer.analyze(trace)
         tool_efficiency, tool_results = self.tool_evaluator.evaluate_tool_chain(trace)
         self_correction_result = self.self_correction_detector.analyze(trace)
-        drift_result = self.intent_drift_meter.analyze(trace)
-        
         # Calculate tool accuracy
         correct_tools = sum(1 for r in tool_results if r.signal.value == "correct")
         tool_accuracy = correct_tools / len(tool_results) if tool_results else 1.0
@@ -184,7 +179,7 @@ class AgentBenchmark:
             trajectory_score=trajectory_result.efficiency_score,
             tool_accuracy=tool_accuracy,
             self_correction_score=self_correction_result.correction_efficiency,
-            intent_drift=drift_result.drift_score,
+            intent_drift=0.0,  # Removed - use agent evaluator instead
             total_cost=trace.total_cost or 0.0,
             total_latency_ms=trace.total_duration_ms or 0,
             step_count=trace.step_count,
@@ -278,7 +273,7 @@ class AgentBenchmark:
                 0.25 * r.trajectory_score +
                 0.2 * r.tool_accuracy +
                 0.15 * r.self_correction_score +
-                0.1 * (1.0 - r.intent_drift)
+                0.0  # intent_drift removed
             )
         
         ranked_runs = sorted(runs, key=score_run, reverse=True)
@@ -318,7 +313,6 @@ class AgentBenchmark:
             lines.append(f"   - Trajectory: {r.trajectory_score:.2f}")
             lines.append(f"   - Tools: {r.tool_accuracy:.2f}")
             lines.append(f"   - Self-correction: {r.self_correction_score:.2f}")
-            lines.append(f"   - Drift: {r.intent_drift:.2f}")
             lines.append(f"   - Cost: ${r.total_cost:.4f}")
             lines.append(f"   - Latency: {r.total_latency_ms}ms")
             lines.append(f"   - Steps: {r.step_count}")
@@ -364,7 +358,6 @@ class AgentBenchmark:
                 avg_trajectory_score=sum(r.trajectory_score for r in results) / len(results),
                 avg_tool_accuracy=sum(r.tool_accuracy for r in results) / len(results),
                 avg_self_correction=sum(r.self_correction_score for r in results) / len(results),
-                avg_drift=sum(r.intent_drift for r in results) / len(results),
                 avg_cost=sum(r.total_cost for r in results) / len(results),
                 avg_latency_ms=sum(r.total_latency_ms for r in results) // len(results),
                 success_rate=sum(1 for r in results if r.success) / len(results),

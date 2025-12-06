@@ -290,6 +290,112 @@ class ReAskDetector:
             details={"judge_result": result}
         )
     
+    def evaluate_response_with_context(
+        self,
+        user_message: Message,
+        assistant_response: Message,
+        follow_up: Optional[Message] = None,
+        conversation_context: str = "",
+        turn_index: int = 0
+    ) -> EvalResult:
+        """
+        Evaluate if an assistant response was good or bad, WITH conversation context.
+        
+        This is the context-aware version that prevents false negatives when
+        an agent is making progress on a multi-step task.
+        
+        Args:
+            user_message: The original user question/request
+            assistant_response: The assistant's response
+            follow_up: Optional next user message (key for detection)
+            conversation_context: Summary of what happened before this turn
+            turn_index: Current turn number (0-indexed)
+        
+        Returns:
+            EvalResult with detection type and confidence
+        """
+        # Step 1: RDM + CCM detection (these are context-independent signals)
+        if follow_up is not None:
+            if self.use_combined_rdm_ccm:
+                combined_result = self._check_rdm_ccm_combined(user_message, follow_up)
+                if combined_result.is_bad:
+                    return combined_result
+            else:
+                rdm_result = self._check_rdm(follow_up)
+                if rdm_result.is_bad:
+                    return rdm_result
+                
+                ccm_result = self._check_ccm(user_message, follow_up)
+                if ccm_result.is_bad:
+                    return ccm_result
+        
+        # Step 2: Check for hallucination if knowledge is provided
+        if user_message.knowledge:
+            hallucination_result = self._check_hallucination(assistant_response, user_message.knowledge)
+            if hallucination_result.is_bad:
+                return hallucination_result
+        
+        # Step 3: Fallback to LLM judge WITH CONTEXT
+        if self.use_llm_judge_fallback:
+            return self._evaluate_with_judge_context(
+                user_message, assistant_response, follow_up, 
+                user_message.knowledge, conversation_context, turn_index
+            )
+        
+        if follow_up is None:
+            return EvalResult(
+                is_bad=False,
+                detection_type=DetectionType.NONE,
+                confidence=0.0,
+                reason="No follow-up message to analyze"
+            )
+        
+        return EvalResult(
+            is_bad=False,
+            detection_type=DetectionType.NONE,
+            confidence=0.8,
+            reason="No re-ask or correction detected"
+        )
+    
+    def _evaluate_with_judge_context(
+        self,
+        user_message: Message,
+        assistant_response: Message,
+        follow_up: Optional[Message],
+        knowledge: Optional[str] = None,
+        conversation_context: str = "",
+        turn_index: int = 0
+    ) -> EvalResult:
+        """Fallback to LLM judge evaluation with conversation context"""
+        result = self.judge.evaluate_with_context(
+            user_message, assistant_response, follow_up, knowledge,
+            conversation_context, turn_index
+        )
+        
+        return EvalResult(
+            is_bad=result["is_bad"],
+            detection_type=DetectionType.LLM_JUDGE,
+            confidence=result["confidence"],
+            reason=result["reason"],
+            details={"judge_result": result, "context_used": bool(conversation_context)}
+        )
+    
+    def generate_turn_summary(
+        self,
+        turn_index: int,
+        user_message: str,
+        agent_response: str,
+        previous_summary: str = ""
+    ) -> dict:
+        """
+        Generate a rolling summary for the conversation.
+        
+        Delegates to the judge's summary generation.
+        """
+        return self.judge.generate_turn_summary(
+            turn_index, user_message, agent_response, previous_summary
+        )
+    
     def evaluate_conversation(
         self,
         messages: list[Message]
@@ -321,3 +427,61 @@ class ReAskDetector:
             i += 1
         
         return results
+    
+    def evaluate_conversation_with_context(
+        self,
+        messages: list[Message]
+    ) -> tuple[list[tuple[int, EvalResult]], list[dict]]:
+        """
+        Evaluate all assistant responses with rolling context.
+        
+        This version maintains a rolling summary of the conversation
+        and passes it to each turn evaluation, preventing false negatives.
+        
+        Args:
+            messages: Full conversation as list of Messages
+        
+        Returns:
+            Tuple of:
+            - List of (index, EvalResult) for each assistant response
+            - List of turn summaries generated
+        """
+        results = []
+        summaries = []
+        rolling_summary = ""
+        turn_index = 0
+        i = 0
+        
+        while i < len(messages):
+            msg = messages[i]
+            if msg.role == Role.USER and i + 1 < len(messages):
+                next_msg = messages[i + 1]
+                if next_msg.role == Role.ASSISTANT:
+                    follow_up = None
+                    if i + 2 < len(messages) and messages[i + 2].role == Role.USER:
+                        follow_up = messages[i + 2]
+                    
+                    # Evaluate with context
+                    result = self.evaluate_response_with_context(
+                        msg, next_msg, follow_up,
+                        conversation_context=rolling_summary,
+                        turn_index=turn_index
+                    )
+                    results.append((i + 1, result))
+                    
+                    # Generate summary for next turn
+                    summary = self.generate_turn_summary(
+                        turn_index, msg.content, next_msg.content, rolling_summary
+                    )
+                    summaries.append({
+                        "turn_index": turn_index,
+                        **summary
+                    })
+                    rolling_summary = summary["summary"]
+                    
+                    turn_index += 1
+                    i += 2
+                    continue
+            i += 1
+        
+        return results, summaries

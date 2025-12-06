@@ -18,7 +18,6 @@ from .agent_models import (
     TrajectoryEvalResult,
     ToolEvalResult,
     SelfCorrectionResult,
-    IntentDriftResult,
     AgentBenchmarkResult,
 )
 
@@ -26,7 +25,6 @@ from .agent_models import (
 from .trajectory import TrajectoryAnalyzer
 from .tool_eval import ToolEvaluator
 from .self_correction import SelfCorrectionDetector
-from .intent_drift import IntentDriftMeter
 
 # Benchmarking
 from .benchmark import (
@@ -59,13 +57,11 @@ __all__ = [
     "TrajectoryEvalResult",
     "ToolEvalResult",
     "SelfCorrectionResult",
-    "IntentDriftResult",
     "AgentBenchmarkResult",
     # Analyzers
     "TrajectoryAnalyzer",
     "ToolEvaluator",
     "SelfCorrectionDetector",
-    "IntentDriftMeter",
     # Benchmarking
     "AgentBenchmark",
     "BenchmarkTask",

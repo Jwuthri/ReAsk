@@ -152,21 +152,6 @@ class SelfCorrectionResult:
         return f"SelfCorrection({status}, awareness={self.self_awareness_score:.2f})"
 
 
-@dataclass
-class IntentDriftResult:
-    """Result of intent drift analysis"""
-    drift_score: float              # 0.0 to 1.0 (1.0 = completely off track)
-    step_index: int                 # Which step has max drift
-    is_legitimate: bool             # Was drift requested by user?
-    reason: str
-    drift_history: List[float] = field(default_factory=list)  # Drift at each step
-    details: dict = field(default_factory=dict)
-    
-    def __repr__(self) -> str:
-        status = "✅" if self.drift_score < 0.3 else ("⚠️" if self.drift_score < 0.6 else "❌")
-        return f"IntentDrift({status} drift={self.drift_score:.2f}, step={self.step_index})"
-
-
 @dataclass 
 class AgentBenchmarkResult:
     """Result of benchmarking an agent on a task"""
@@ -176,7 +161,6 @@ class AgentBenchmarkResult:
     trajectory_score: float
     tool_accuracy: float
     self_correction_score: float
-    intent_drift: float
     total_cost: float
     total_latency_ms: int
     step_count: int

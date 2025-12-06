@@ -1,0 +1,1015 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-y: auto;
+}
+
+/* Empty State */
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  padding: 2rem;
+  color: var(--text-secondary);
+}
+
+.emptyIcon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  opacity: 0.5;
+}
+
+.emptyState h3 {
+  font-size: 1.1rem;
+  color: var(--text-primary);
+  margin: 0 0 0.5rem 0;
+}
+
+.emptyState p {
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+/* Header */
+.header {
+  padding: 1.25rem;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 0.25rem 0;
+}
+
+.subtitle {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Agent Header */
+.agentHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.agentIcon {
+  font-size: 1.75rem;
+}
+
+.roleTag {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  text-transform: capitalize;
+  margin-top: 0.25rem;
+  display: inline-block;
+}
+
+/* Turn Header */
+.turnHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.turnNumber {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.detectionBadge {
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: white;
+}
+
+.driftBadge {
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: white;
+}
+
+/* Score Hero */
+.scoreHero {
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.scoreDisplay {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  margin-bottom: 1rem;
+}
+
+.scoreValue {
+  font-size: 4rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.scoreMeta {
+  display: flex;
+  flex-direction: column;
+  margin-left: 0.25rem;
+}
+
+.scorePercent {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  line-height: 1;
+}
+
+.scoreLabel {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 0.25rem;
+}
+
+.scoreBar {
+  position: relative;
+  height: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.scoreBarFill {
+  height: 100%;
+  border-radius: 5px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.scoreBarFill::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 16px;
+  background: inherit;
+  border-radius: 2px;
+  box-shadow: 0 0 8px currentColor;
+}
+
+.scoreBarMarkers {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
+.scoreBarMarkers span {
+  position: absolute;
+  top: -2px;
+  width: 1px;
+  height: 12px;
+  background: var(--text-muted);
+  opacity: 0.3;
+}
+
+.scoreScale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.5rem;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.scoreLabel {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Agent Score Section */
+.agentScoreSection {
+  display: flex;
+  flex-direction: column;
+  padding: 1.25rem;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.agentScoreHeader {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.agentScoreDisplay {
+  display: flex;
+  align-items: baseline;
+  gap: 0.1rem;
+  min-width: 80px;
+}
+
+.agentScoreValue {
+  font-size: 2.5rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.agentScorePercent {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.agentScoreBar {
+  flex: 1;
+  height: 6px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.agentScoreBarFill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.5s ease-out;
+}
+
+.subMetrics {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+  flex: 1;
+}
+
+.subMetric {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.subMetricLabel {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.subMetricValue {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+/* Metrics Grid */
+.metricsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.metricCard {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+.metricIcon {
+  font-size: 1.25rem;
+}
+
+.metricContent {
+  display: flex;
+  flex-direction: column;
+}
+
+.metricValue {
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.metricLabel {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.metricSublabel {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-transform: capitalize;
+}
+
+/* Sections */
+.section {
+  padding: 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.section:last-child {
+  border-bottom: none;
+}
+
+.sectionTitle {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 0.75rem 0;
+}
+
+/* Info Grid */
+.infoGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.infoItem {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.infoLabel {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.infoValue {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.tagList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.capTag {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  background: var(--accent-cyan);
+  color: var(--bg-primary);
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.toolTag {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  background: var(--accent-purple);
+  color: white;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+/* Agent Summary */
+.agentSummaryList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.agentSummaryItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.75rem;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+}
+
+.agentSummaryInfo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.agentSummaryName {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.agentSummaryRole {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  text-transform: capitalize;
+}
+
+.agentSummaryScore {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.miniBar {
+  width: 60px;
+  height: 6px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.miniBarFill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+/* Detection Breakdown */
+.detectionBreakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.detectionRow {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.detectionLabel {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  min-width: 80px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.detectionBarContainer {
+  flex: 1;
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.detectionBar {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+.detectionCount {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 24px;
+  text-align: right;
+}
+
+/* Issues & Recommendations */
+.issuesList,
+.recommendationsList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.issueItem {
+  padding: 0.5rem 0.75rem;
+  background: rgba(245, 158, 11, 0.1);
+  border-left: 3px solid var(--accent-orange);
+  border-radius: 0 6px 6px 0;
+  font-size: 0.85rem;
+  color: var(--accent-orange);
+}
+
+.recommendationItem {
+  padding: 0.5rem 0.75rem;
+  background: rgba(6, 182, 212, 0.1);
+  border-left: 3px solid var(--accent-cyan);
+  border-radius: 0 6px 6px 0;
+  font-size: 0.85rem;
+  color: var(--accent-cyan);
+}
+
+/* Score Breakdown */
+.scoreBreakdown {
+  padding: 1rem;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.breakdownHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.breakdownLabel {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.breakdownValue {
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.breakdownBar {
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+}
+
+.breakdownFill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.breakdownReason {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  font-style: italic;
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Message Box */
+.messageBox {
+  padding: 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.responseBox {
+  padding: 0.75rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--accent-cyan);
+  border-radius: 0 8px 8px 0;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  line-height: 1.5;
+  margin-top: 0.5rem;
+}
+
+/* Interaction Block */
+.interactionBlock {
+  margin-bottom: 1rem;
+}
+
+.interactionBlock.dimmed {
+  opacity: 0.5;
+}
+
+.interactionHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.interactionAgent {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent-cyan);
+}
+
+.latencyBadge {
+  font-size: 0.65rem;
+  padding: 0.15rem 0.4rem;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border-radius: 4px;
+}
+
+/* Steps Section */
+.stepsSection {
+  margin-bottom: 0.75rem;
+}
+
+.stepsHeader {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  margin-bottom: 0.5rem;
+}
+
+/* Step Card */
+.stepCard {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+.stepCard.expanded {
+  border-color: var(--accent-cyan);
+}
+
+.stepHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+
+.stepHeader:hover {
+  background: var(--bg-secondary);
+}
+
+.stepIndex {
+  font-weight: 600;
+  color: var(--text-secondary);
+  min-width: 50px;
+}
+
+.toolBadge {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  background: var(--accent-purple);
+  color: white;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.thoughtPreview {
+  flex: 1;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.expandIcon {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+.stepContent {
+  padding: 0.75rem;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.stepItem {
+  margin-bottom: 0.75rem;
+}
+
+.stepItem:last-child {
+  margin-bottom: 0;
+}
+
+.stepItemLabel {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  margin-bottom: 0.35rem;
+}
+
+.stepItemContent {
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.toolCallDetail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.toolName {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  background: var(--accent-purple);
+  color: white;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.toolParams {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  padding: 0.5rem;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 0;
+}
+
+.toolResult {
+  display: flex;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--accent-green);
+  align-items: flex-start;
+}
+
+.toolError {
+  display: flex;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--accent-red);
+  align-items: flex-start;
+}
+
+.resultLabel,
+.errorLabel {
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.toolLatency {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+/* ============================================
+   METRIC CARDS (Per-Agent Full Breakdown)
+   ============================================ */
+
+.metricCardsGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.metricCardExpand {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.metricCardExpand:hover {
+  border-color: var(--accent-cyan);
+}
+
+.metricCardExpand.expanded {
+  border-color: var(--accent-cyan);
+}
+
+.metricCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+}
+
+.metricCardIcon {
+  font-size: 1.1rem;
+}
+
+.metricCardTitle {
+  flex: 1;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.metricCardScore {
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.expandArrow {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  margin-left: 0.5rem;
+}
+
+.metricCardBody {
+  padding: 0 0.75rem 0.75rem;
+  border-top: 1px solid var(--border-color);
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+}
+
+.metricStats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+}
+
+.metricStat {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg-primary);
+  border-radius: 4px;
+}
+
+.metricStat span:first-child {
+  color: var(--text-muted);
+}
+
+.metricStat span:last-child {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.metricStat .good {
+  color: var(--accent-green);
+}
+
+.metricStat .bad {
+  color: var(--accent-red);
+}
+
+.metricResults {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.metricResultItem {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg-primary);
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.metricResultItem .toolIcon {
+  font-size: 0.9rem;
+}
+
+.metricResultItem .toolName {
+  flex: 1;
+  font-weight: 500;
+  padding: 0;
+  background: none;
+  color: var(--text-primary);
+}
+
+.metricResultItem .signal {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.35rem;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.metricResultItem .signal.good {
+  background: rgba(var(--green-rgb), 0.15);
+  color: var(--accent-green);
+}
+
+.metricResultItem .signal.bad {
+  background: rgba(var(--red-rgb), 0.15);
+  color: var(--accent-red);
+}
+
+.metricResultItem .turnLabel {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+.metricResultItem .confidence {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+/* Simple metric card (no expansion) */
+.metricCardSimple {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+/* Drift Chart */
+.driftChart {
+  margin-top: 0.75rem;
+}
+
+.chartLabel {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.driftBars {
+  display: flex;
+  gap: 4px;
+  height: 60px;
+  align-items: flex-end;
+}
+
+.driftBar {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+}
+
+.driftBarFill {
+  width: 100%;
+  border-radius: 2px 2px 0 0;
+  min-height: 2px;
+  transition: height 0.3s ease;
+}
+
+.driftBarLabel {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+/* Interactions count */
+.interactionsCount {
+  margin-top: 1rem;
+  text-align: center;
+}
+
+.interactionsLabel {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* Fallback metrics (when per-agent data isn't available) */
+.fallbackMetrics {
+  padding: 0.5rem 0;
+}
+
+.fallbackNote {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin: 0 0 0.75rem 0;
+  font-style: italic;
+}
+

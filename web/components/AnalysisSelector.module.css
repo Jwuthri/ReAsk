@@ -55,15 +55,20 @@
   border: 2px solid var(--border-color);
   border-radius: 10px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: 
+    border-color 0.3s ease,
+    background-color 0.3s ease,
+    box-shadow 0.3s ease,
+    transform 0.2s ease;
   text-align: left;
   min-height: 100px;
+  box-shadow: 0 0 0 0px transparent, 0 0 0 transparent;
 }
 
 .option:hover:not(:disabled) {
   border-color: var(--accent-cyan);
   background: var(--bg-secondary);
-  transform: translateY(-2px);
+  transform: translateY(-1px);
 }
 
 .option:disabled {
@@ -75,6 +80,7 @@
   border-color: var(--accent-cyan);
   background: rgba(6, 182, 212, 0.1);
   box-shadow: 0 0 0 1px var(--accent-cyan), 0 4px 12px rgba(6, 182, 212, 0.15);
+  transform: translateY(0);
 }
 
 .optionHeader {
@@ -136,11 +142,11 @@
   padding-top: 0.75rem;
   border-top: 1px solid var(--border-color);
   width: 100%;
-  animation: fadeIn 0.2s ease;
+  animation: fadeIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(-5px); }
+  from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
 }
 

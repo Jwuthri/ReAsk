@@ -135,7 +135,6 @@ class AgentSession(Base):
     trajectory_result = Column(Text, nullable=True)  # JSON
     tools_result = Column(Text, nullable=True)  # JSON
     self_correction_result = Column(Text, nullable=True)  # JSON
-    intent_drift_result = Column(Text, nullable=True)  # JSON
     
     created_at = Column(DateTime, default=datetime.utcnow)
     
@@ -242,7 +241,6 @@ class AgentAnalysis(Base):
     
     1. SESSION LEVEL (stored here):
        - overall_score: Aggregated score across all metrics
-       - intent_drift: Did the agents drift from original task?
        - coordination: How well did agents work together?
        
     2. TURN LEVEL (TurnAnalysisResult):
@@ -275,8 +273,6 @@ class AgentAnalysis(Base):
     # ========== SESSION-LEVEL RESULTS ==========
     overall_score = Column(Float, nullable=True)
     
-    # Intent drift across the entire session
-    intent_drift_result_json = Column(Text, nullable=True)
     
     # Multi-agent coordination score
     coordination_score = Column(Float, nullable=True)
@@ -287,12 +283,20 @@ class AgentAnalysis(Base):
     
     # Per-agent summary scores (aggregated from interactions)
     agent_scores_json = Column(Text, nullable=True)  # {"agent1": 0.85, "agent2": 0.72}
+    per_agent_scores_json = Column(Text, nullable=True)  # Full per-agent analysis with scores, issues, recommendations
     
     # ========== AGGREGATED RESULTS (for backwards compat) ==========
     conversation_result_json = Column(Text, nullable=True)  # Aggregated turn results
     trajectory_result_json = Column(Text, nullable=True)
     tools_result_json = Column(Text, nullable=True)  # Aggregated tool use
     self_correction_result_json = Column(Text, nullable=True)
+    
+    # ========== CONTEXT-AWARE EVALUATION (NEW) ==========
+    # Rolling summaries for each turn (for context-aware evaluation)
+    turn_summaries_json = Column(Text, nullable=True)  # [{turn_index, summary, key_facts, current_status}]
+    
+    # Goal hierarchy for intent drift (tracks main task + sub-goals)
+    goal_hierarchy_json = Column(Text, nullable=True)  # {main_goal, active_goals, completed_goals, goal_history}
     
     # Error handling
     error_message = Column(Text, nullable=True)
@@ -322,6 +326,14 @@ class TurnAnalysisResult(Base):
     # Turn-level metrics
     drift_score = Column(Float, nullable=True)
     agent_coordination_score = Column(Float, nullable=True)
+    
+    # ========== CONTEXT-AWARE EVALUATION (NEW) ==========
+    # Context summary used when evaluating this turn
+    context_summary = Column(Text, nullable=True)  # Rolling summary of previous turns
+    # Goal this turn was evaluated against (for goal-aware drift)
+    active_goal = Column(Text, nullable=True)  # The relevant goal for this turn
+    # Whether context was used in evaluation
+    context_used = Column(Boolean, nullable=True)
     
     created_at = Column(DateTime, default=datetime.utcnow)
     
@@ -382,6 +394,14 @@ class InteractionAnalysisResult(Base):
     # ========== OVERALL ==========
     overall_score = Column(Float, nullable=True)  # Weighted average
     issues_json = Column(Text, nullable=True)  # All issues combined
+    
+    # ========== FULL METRIC BREAKDOWNS (NEW) ==========
+    # Detailed tool use breakdown
+    tool_use_details_json = Column(Text, nullable=True)  # {efficiency, calls, errors, results}
+    # Detailed self-correction breakdown
+    self_correction_details_json = Column(Text, nullable=True)  # {detected_error, attempt, awareness_score}
+    # Detailed response quality breakdown
+    response_quality_details_json = Column(Text, nullable=True)  # {good_count, bad_count, results}
     
     created_at = Column(DateTime, default=datetime.utcnow)
     

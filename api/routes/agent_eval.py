@@ -28,7 +28,7 @@ from ..database import (
 from reask import (
     AgentTrace, AgentStep, ToolCall,
     TrajectoryAnalyzer, ToolEvaluator,
-    SelfCorrectionDetector, IntentDriftMeter,
+    SelfCorrectionDetector,
     AgentBenchmark,
     ReAskDetector, Message as ReAskMessage,
 )
@@ -90,6 +90,7 @@ class AgentInteractionInput(BaseModel):
     agent_steps: Optional[List[StepInput]] = None
     agent_response: Optional[str] = None
     tool_execution_result: Optional[ToolExecutionResult] = None
+    latency_ms: Optional[int] = None
 
 
 class TurnInput(BaseModel):
@@ -182,7 +183,7 @@ class AnalysisRequest(BaseModel):
     """Request for analysis - accepts both simple trace or full session"""
     trace: Optional[AgentTraceInput] = None  # Simple single-agent format
     session: Optional[AgentSessionInput] = None  # Full multi-agent format
-    analysis_types: List[str]  # conversation, trajectory, tools, self_correction, intent_drift, coordination, full_agent, full_all
+    analysis_types: List[str]  # conversation, trajectory, tools, self_correction, coordination, full_agent, full_all
     
     def get_session(self) -> AgentSessionInput:
         """Get session input, converting from trace if needed"""
@@ -242,49 +243,111 @@ def compute_per_agent_scores(
     """
     Compute per-agent scores for multi-agent sessions.
     
+    NOW includes ALL metrics per agent:
+    - tool_use: Efficiency and correctness of tool usage
+    - self_correction: Error detection and recovery
+    - response_quality: Quality of agent responses
+    - reasoning: Quality of reasoning steps
+    - handoff: How well agent hands off to others
+    
     Returns:
         {
-            'per_agent_scores': { agent_id: { overall, tool_use, reasoning, handoff, ... } },
+            'per_agent_scores': { agent_id: { 
+                overall, 
+                tool_use: { efficiency, calls, errors, results },
+                self_correction: { detected_error, correction_attempt, awareness_score },
+                response_quality: { good_count, bad_count, results },
+                reasoning, handoff, ...
+            } },
             'coordination_score': float
         }
     """
     if not session.agents or len(session.agents) <= 1:
-        # Single agent - no per-agent breakdown needed
-        return {}
+        # Single agent - still compute full metrics but no coordination
+        pass
     
     # Track metrics per agent
     agent_metrics = {}
-    for agent in session.agents:
+    agents = session.agents or [AgentDef(id="agent", name="Agent", role="primary")]
+    
+    for agent in agents:
         agent_id = agent.id
         agent_metrics[agent_id] = {
-            'tool_calls': 0,
+            # Tool metrics
+            'tool_calls': [],
             'tool_errors': 0,
+            'tool_results': [],
+            # Reasoning metrics
             'reasoning_steps': 0,
+            'thoughts': [],
+            # Handoff metrics
             'handoffs': 0,
+            'handoff_targets': [],
+            # Interaction tracking
             'interactions_count': 0,
+            'turn_indices': [],
+            # Response tracking (for per-agent conversation analysis)
+            'responses': [],
+            # Issues and recommendations
             'issues': [],
             'recommendations': [],
             'tools_available': set(t.name for t in (agent.tools_available or []) if t.name) if agent.tools_available else set(),
         }
 
     # Analyze each turn's interactions
-    for turn in session.turns:
-        if not turn.agent_interactions:
-            continue
+    for turn_idx, turn in enumerate(session.turns):
+        # Handle both multi-agent (with agent_interactions) and single-agent (direct response) formats
+        interactions = turn.agent_interactions
+        if not interactions:
+            # Single-agent format: create a synthetic interaction from the turn's direct fields
+            if turn.agent_response or turn.agent_steps:
+                default_agent_id = agents[0].id if agents else 'agent'
+                interactions = [AgentInteractionInput(
+                    agent_id=default_agent_id,
+                    agent_steps=turn.agent_steps,
+                    agent_response=turn.agent_response,
+                    latency_ms=getattr(turn, 'latency_ms', None),
+                )]
+            else:
+                continue
         
-        for idx, interaction in enumerate(turn.agent_interactions):
+        for idx, interaction in enumerate(interactions):
             agent_id = interaction.agent_id
             if agent_id not in agent_metrics:
-                continue
+                # Create metrics for unknown agent
+                agent_metrics[agent_id] = {
+                    'tool_calls': [], 'tool_errors': 0, 'tool_results': [],
+                    'reasoning_steps': 0, 'thoughts': [],
+                    'handoffs': 0, 'handoff_targets': [],
+                    'interactions_count': 0, 'turn_indices': [],
+                    'responses': [], 'issues': [], 'recommendations': [],
+                    'tools_available': set(),
+                }
             
             metrics = agent_metrics[agent_id]
             metrics['interactions_count'] += 1
+            metrics['turn_indices'].append(turn_idx)
+            
+            # Track response
+            if interaction.agent_response:
+                metrics['responses'].append({
+                    'turn_index': turn_idx,
+                    'response': interaction.agent_response,
+                    'latency_ms': interaction.latency_ms,
+                })
             
             # Analyze steps
             for step in (interaction.agent_steps or []):
                 if step.tool_call:
-                    metrics['tool_calls'] += 1
                     tool_name = step.tool_call.tool_name
+                    tool_call_info = {
+                        'turn_index': turn_idx,
+                        'tool_name': tool_name,
+                        'parameters': step.tool_call.parameters,
+                        'result': step.tool_call.result,
+                        'error': step.tool_call.error,
+                    }
+                    metrics['tool_calls'].append(tool_call_info)
                     
                     # Check if tool is authorized
                     if metrics['tools_available'] and tool_name not in metrics['tools_available']:
@@ -297,64 +360,210 @@ def compute_per_agent_scores(
                 
                 if step.thought:
                     metrics['reasoning_steps'] += 1
+                    metrics['thoughts'].append({
+                        'turn_index': turn_idx,
+                        'thought': step.thought,
+                    })
             
             # Check for handoffs (not the last interaction in turn)
             if idx < len(turn.agent_interactions) - 1:
                 metrics['handoffs'] += 1
+                next_agent = turn.agent_interactions[idx + 1].agent_id
+                metrics['handoff_targets'].append({
+                    'turn_index': turn_idx,
+                    'target_agent': next_agent,
+                })
+    
+    # Extract per-agent data from global results
+    global_conversation = results.get('conversation', {})
+    global_tools = results.get('tools', {})
+    global_self_correction = results.get('self_correction', {})
     
     # Compute scores per agent
     per_agent_scores = {}
-    for agent in session.agents:
+    for agent in agents:
         agent_id = agent.id
-        metrics = agent_metrics[agent_id]
+        metrics = agent_metrics.get(agent_id, {})
         
-        # Tool use score
-        tool_use = None
-        if metrics['tool_calls'] > 0:
-            tool_use = max(0, 1.0 - (metrics['tool_errors'] / metrics['tool_calls']))
-            if tool_use < 0.7:
-                metrics['recommendations'].append(f"Improve tool selection - {metrics['tool_errors']} errors in {metrics['tool_calls']} calls")
+        # ===========================================
+        # TOOL USE (full breakdown)
+        # ===========================================
+        tool_use_data = None
+        if metrics.get('tool_calls'):
+            tool_calls = metrics['tool_calls']
+            error_count = metrics.get('tool_errors', 0)
+            efficiency = max(0, 1.0 - (error_count / len(tool_calls))) if tool_calls else 1.0
+            
+            # Match with global tool results if available
+            tool_results = []
+            global_tool_results = global_tools.get('results', [])
+            for tc in tool_calls:
+                # Find matching global result
+                matching = next(
+                    (r for r in global_tool_results if r.get('tool_name') == tc['tool_name']),
+                    None
+                )
+                tool_results.append({
+                    **tc,
+                    'signal': matching.get('signal', 'unknown') if matching else 'unknown',
+                    'confidence': matching.get('confidence', 0.5) if matching else 0.5,
+                    'reason': matching.get('reason', '') if matching else '',
+                })
+            
+            tool_use_data = {
+                'efficiency': round(efficiency, 2),
+                'total_calls': len(tool_calls),
+                'correct_count': len(tool_calls) - error_count,
+                'error_count': error_count,
+                'results': tool_results,
+            }
+            
+            if efficiency < 0.7:
+                metrics['recommendations'].append(f"Improve tool selection - {error_count} errors in {len(tool_calls)} calls")
         
-        # Reasoning score (simplified - based on having reasoning steps)
+        # ===========================================
+        # SELF CORRECTION (per agent)
+        # ===========================================
+        self_correction_data = None
+        if metrics.get('thoughts'):
+            # Analyze thoughts for self-correction patterns
+            thoughts = [t['thought'] for t in metrics['thoughts']]
+            error_keywords = ['error', 'mistake', 'wrong', 'incorrect', 'fix', 'retry', 'oops']
+            recovery_keywords = ['fixed', 'corrected', 'resolved', 'now', 'instead']
+            
+            detected_error = any(kw in ' '.join(thoughts).lower() for kw in error_keywords)
+            correction_attempt = any(kw in ' '.join(thoughts).lower() for kw in recovery_keywords)
+            
+            # Calculate awareness score based on thought quality
+            awareness_score = 0.5  # Default
+            if detected_error and correction_attempt:
+                awareness_score = 0.9
+            elif detected_error:
+                awareness_score = 0.7
+            elif metrics['reasoning_steps'] > 2:
+                awareness_score = 0.8  # Good reasoning = good self-awareness
+            
+            self_correction_data = {
+                'detected_error': detected_error,
+                'correction_attempt': correction_attempt,
+                'correction_success': correction_attempt,  # Assume success if attempted
+                'self_awareness_score': round(awareness_score, 2),
+                'correction_efficiency': round(awareness_score * 0.9, 2),  # Simplified
+                'reasoning_steps': metrics['reasoning_steps'],
+            }
+        
+        # ===========================================
+        # RESPONSE QUALITY (per agent)
+        # ===========================================
+        response_quality_data = None
+        if metrics.get('responses') and global_conversation:
+            global_results = global_conversation.get('results', [])
+            
+            agent_responses = metrics['responses']
+            agent_results = []
+            good_count = 0
+            bad_count = 0
+            
+            for resp in agent_responses:
+                turn_idx = resp['turn_index']
+                # Find matching conversation result
+                matching = next(
+                    (r for r in global_results if r.get('step_index') == turn_idx),
+                    None
+                )
+                if matching:
+                    agent_results.append({
+                        'turn_index': turn_idx,
+                        'is_bad': matching.get('is_bad', False),
+                        'detection_type': matching.get('detection_type', 'none'),
+                        'confidence': matching.get('confidence', 0.5),
+                        'reason': matching.get('reason', ''),
+                    })
+                    if matching.get('is_bad'):
+                        bad_count += 1
+                    else:
+                        good_count += 1
+            
+            total = good_count + bad_count
+            response_quality_data = {
+                'good_count': good_count,
+                'bad_count': bad_count,
+                'total_responses': total,
+                'quality_score': round(good_count / total, 2) if total > 0 else 1.0,
+                'results': agent_results,
+            }
+        
+        # ===========================================
+        # REASONING SCORE
+        # ===========================================
         reasoning = None
-        if metrics['reasoning_steps'] > 0:
-            reasoning = min(1.0, metrics['reasoning_steps'] / max(metrics['interactions_count'], 1))
+        if metrics.get('reasoning_steps', 0) > 0:
+            # Score based on reasoning depth
+            reasoning = min(1.0, metrics['reasoning_steps'] / max(metrics.get('interactions_count', 1), 1))
         
-        # Handoff score (placeholder - would need more analysis)
+        # ===========================================
+        # HANDOFF SCORE
+        # ===========================================
         handoff = None
-        if metrics['handoffs'] > 0:
-            handoff = 0.85  # Default good score, would need context analysis
+        handoff_data = None
+        if metrics.get('handoffs', 0) > 0:
+            handoff = 0.85  # Default good score
+            handoff_data = {
+                'total_handoffs': metrics['handoffs'],
+                'targets': metrics.get('handoff_targets', []),
+                'quality_score': round(handoff, 2),
+            }
         
-        # Calculate overall for this agent
-        scores = [s for s in [tool_use, reasoning, handoff] if s is not None]
+        # ===========================================
+        # CALCULATE OVERALL SCORE
+        # ===========================================
+        scores = []
+        if tool_use_data:
+            scores.append(tool_use_data['efficiency'])
+        if self_correction_data:
+            scores.append(self_correction_data['self_awareness_score'])
+        if response_quality_data:
+            scores.append(response_quality_data['quality_score'])
+        if reasoning is not None:
+            scores.append(reasoning)
+        if handoff is not None:
+            scores.append(handoff)
+        
         if scores:
             overall = sum(scores) / len(scores)
         else:
             overall = 0.8  # Default score when no metrics available
         
-        # Add tool-related recommendations
-        if tool_use is not None and tool_use < 0.7:
-            metrics['recommendations'].append("Consider validating tool parameters before execution")
-        
+        # Build the full per-agent score object
         per_agent_scores[agent_id] = {
             'overall': round(overall, 2),
-            'tool_use': round(tool_use, 2) if tool_use is not None else None,
+            # Full metric breakdowns
+            'tool_use': tool_use_data,
+            'self_correction': self_correction_data,
+            'response_quality': response_quality_data,
+            # Simple scores
             'reasoning': round(reasoning, 2) if reasoning is not None else None,
-            'handoff': round(handoff, 2) if handoff is not None else None,
-            'response_quality': 0.85,  # Placeholder
-            'interactions_count': metrics['interactions_count'],
-            'issues': metrics['issues'],
-            'recommendations': metrics['recommendations'],
+            'handoff': handoff_data,
+            # Metadata
+            'interactions_count': metrics.get('interactions_count', 0),
+            'issues': metrics.get('issues', []),
+            'recommendations': metrics.get('recommendations', []),
         }
     
-    # Coordination score (how well agents worked together)
-    # Higher if no duplicate work, proper handoffs, etc.
+    # ===========================================
+    # COORDINATION SCORE
+    # ===========================================
     coordination_score = 0.85  # Default good score
     
     # Penalize if any agent has issues
-    total_issues = sum(len(s['issues']) for s in per_agent_scores.values())
+    total_issues = sum(len(s.get('issues', [])) for s in per_agent_scores.values())
     if total_issues > 0:
         coordination_score = max(0.5, coordination_score - (total_issues * 0.1))
+    
+    # Bonus for good handoffs
+    total_handoffs = sum(m.get('handoffs', 0) for m in agent_metrics.values())
+    if total_handoffs > 0:
+        coordination_score = min(1.0, coordination_score + 0.05)
     
     return {
         'per_agent_scores': per_agent_scores,
@@ -389,19 +598,10 @@ class SelfCorrectionResultModel(BaseModel):
     reason: str
 
 
-class IntentDriftResultModel(BaseModel):
-    drift_score: float
-    step_index: int
-    is_legitimate: bool
-    reason: str
-    drift_history: List[float]
-
-
 class FullAnalysisResponse(BaseModel):
     trajectory: Optional[TrajectoryResult] = None
     tools: Optional[dict] = None
     self_correction: Optional[SelfCorrectionResultModel] = None
-    intent_drift: Optional[IntentDriftResultModel] = None
 
 
 def convert_to_agent_trace(input_trace: AgentTraceInput) -> AgentTrace:
@@ -471,8 +671,141 @@ def convert_trace_to_conversation(input_trace: AgentTraceInput) -> List[ReAskMes
     return messages
 
 
+def build_full_turn_response_from_session(turn: TurnInput) -> str:
+    """
+    Build a comprehensive response string from ALL agent interactions in a turn.
+    This ensures the context includes executor results, tool outputs, etc.
+    """
+    parts = []
+    for interaction in (turn.agent_interactions or []):
+        agent_id = interaction.agent_id
+        # Include agent thoughts and tool results
+        for step in (interaction.agent_steps or []):
+            if step.thought:
+                parts.append(f"[{agent_id}] Thought: {step.thought}")
+            if step.tool_call:
+                tc = step.tool_call
+                if tc.result:
+                    parts.append(f"[{agent_id}] Tool '{tc.tool_name}': {tc.result}")
+                elif tc.error:
+                    parts.append(f"[{agent_id}] Tool '{tc.tool_name}' error: {tc.error}")
+        # Include agent's response
+        if interaction.agent_response:
+            parts.append(f"[{agent_id}]: {interaction.agent_response}")
+    
+    return "\n".join(parts) if parts else "(no response)"
+
+
+def run_conversation_analysis_with_context(session: AgentSessionInput) -> dict:
+    """
+    Run CCM/RDM/Hallucination/LLM Judge analysis on multi-agent session WITH CONTEXT.
+    
+    This version:
+    1. Uses ALL agent interactions per turn (not just the first)
+    2. Maintains a rolling summary passed to each evaluation
+    3. Prevents false negatives like "looking up order is bad"
+    """
+    turns = session.turns
+    if not turns:
+        return {
+            'total_responses': 0,
+            'good_responses': 0,
+            'bad_responses': 0,
+            'ccm_detections': 0,
+            'rdm_detections': 0,
+            'llm_judge_detections': 0,
+            'hallucination_detections': 0,
+            'results': [],
+            'turn_summaries': [],
+            'reason': 'No turns to analyze',
+        }
+    
+    detector = ReAskDetector(
+        ccm_model="gpt-5-nano",
+        rdm_model="gpt-5-nano", 
+        judge_model="gpt-5-mini",
+        similarity_threshold=0.5,
+        use_llm_confirmation=True,
+        use_llm_judge_fallback=True
+    )
+    
+    results = []
+    turn_summaries = []
+    ccm = rdm = llm_judge = hallucination = bad = 0
+    rolling_summary = ""
+    
+    for turn_idx, turn in enumerate(turns):
+        user_msg_text = turn.user_message or ""
+        # Build FULL response including ALL agents' work
+        full_response = build_full_turn_response_from_session(turn)
+        
+        user_msg = ReAskMessage.user(user_msg_text)
+        assistant_msg = ReAskMessage.assistant(full_response)
+        
+        # Get follow-up if exists
+        follow_up = None
+        if turn_idx + 1 < len(turns):
+            next_turn = turns[turn_idx + 1]
+            if next_turn.user_message:
+                follow_up = ReAskMessage.user(next_turn.user_message)
+        
+        # Evaluate this turn WITH CONTEXT
+        result = detector.evaluate_response_with_context(
+            user_msg, assistant_msg, follow_up,
+            conversation_context=rolling_summary,
+            turn_index=turn_idx
+        )
+        
+        detection_type = result.detection_type.value
+        results.append({
+            'step_index': turn_idx,
+            'is_bad': result.is_bad,
+            'detection_type': detection_type,
+            'confidence': result.confidence,
+            'reason': result.reason,
+            'context_used': bool(rolling_summary),
+        })
+        
+        if result.is_bad:
+            bad += 1
+        if detection_type == 'ccm':
+            ccm += 1
+        elif detection_type == 'rdm':
+            rdm += 1
+        elif detection_type == 'llm_judge':
+            llm_judge += 1
+        elif detection_type == 'hallucination':
+            hallucination += 1
+        
+        # Generate rolling summary using FULL response
+        summary = detector.generate_turn_summary(
+            turn_idx, user_msg_text, full_response, rolling_summary
+        )
+        turn_summaries.append({
+            'turn_index': turn_idx,
+            **summary
+        })
+        rolling_summary = summary.get('summary', '')
+    
+    total = len(turns)
+    good = total - bad
+    
+    return {
+        'total_responses': total,
+        'good_responses': good,
+        'bad_responses': bad,
+        'ccm_detections': ccm,
+        'rdm_detections': rdm,
+        'llm_judge_detections': llm_judge,
+        'hallucination_detections': hallucination,
+        'results': results,
+        'turn_summaries': turn_summaries,
+        'reason': f'Analyzed {total} turns with rolling context: {bad} issues found' if total > 0 else 'No turns to analyze',
+    }
+
+
 def run_conversation_analysis(input_trace: AgentTraceInput) -> dict:
-    """Run CCM/RDM/Hallucination/LLM Judge analysis on agent trace"""
+    """Run CCM/RDM/Hallucination/LLM Judge analysis on agent trace (legacy, no context)"""
     messages = convert_trace_to_conversation(input_trace)
     
     if len(messages) < 2:
@@ -549,12 +882,12 @@ async def analyze_agent_trace(request: AnalysisRequest):
     - trajectory: Detect circular patterns, regressions, efficiency
     - tools: Evaluate tool selection and parameters
     - self_correction: Track error awareness and recovery
-    - intent_drift: Measure task alignment
     - full_agent: Run all agent analyses
     - full_all: Run all analyses (conversation + agent)
     """
     start_time = time.time()
-    # Get trace input (handles both trace and session formats)
+    # Get session (for context-aware analysis) and trace (for legacy analyzers)
+    session = request.get_session()
     trace_input = request.get_trace()
     task_preview = trace_input.task[:50] if trace_input.task else ""
     console.print(f"[bold cyan]📊 Starting analysis:[/] task='[dim]{task_preview}...[/]' types={request.analysis_types}")
@@ -566,24 +899,26 @@ async def analyze_agent_trace(request: AnalysisRequest):
     
     # Expand full_all to include everything
     if 'full_all' in analysis_types:
-        analysis_types = ['conversation', 'trajectory', 'tools', 'self_correction', 'intent_drift']
+        analysis_types = ['conversation', 'trajectory', 'tools', 'self_correction']
     # Expand full_agent to include all agent analyses
     elif 'full_agent' in analysis_types:
-        analysis_types = ['trajectory', 'tools', 'self_correction', 'intent_drift']
+        analysis_types = ['trajectory', 'tools', 'self_correction']
     
-    # Run conversation analysis (CCM/RDM/Hallucination)
-    if 'conversation' in analysis_types:
-        console.print("  [yellow]→[/] Running conversation analysis (CCM/RDM/Hallucination)")
-        conv_result = run_conversation_analysis(trace_input)
-        results['conversation'] = conv_result
-        console.print(f"    [green]✓[/] Conversation: {conv_result['bad_responses']}/{conv_result['total_responses']} issues")
-    
-    # Run trajectory analysis
-    if 'trajectory' in analysis_types:
+    # Run analyses in parallel - they do not depend on each other
+    analysis_tasks = {}
+
+    async def run_conversation():
+        console.print("  [yellow]→[/] Running conversation analysis (CCM/RDM/Hallucination) [bold]with context[/]")
+        # Use context-aware analysis with full agent interactions
+        conv_result = await asyncio.to_thread(run_conversation_analysis_with_context, session)
+        console.print(f"    [green]✓[/] Conversation: {conv_result['bad_responses']}/{conv_result['total_responses']} issues [dim](context-aware)[/]")
+        return conv_result
+
+    async def run_trajectory():
         console.print("  [yellow]→[/] Running trajectory analysis")
         analyzer = TrajectoryAnalyzer()
-        result = analyzer.analyze(trace)
-        results['trajectory'] = {
+        result = await asyncio.to_thread(analyzer.analyze, trace)
+        traj_result = {
             'signal': result.signal.value,
             'confidence': result.confidence,
             'efficiency_score': result.efficiency_score,
@@ -592,13 +927,13 @@ async def analyze_agent_trace(request: AnalysisRequest):
             'reason': result.reason,
         }
         console.print(f"    [green]✓[/] Trajectory: signal=[bold]{result.signal.value}[/] efficiency=[cyan]{result.efficiency_score:.0%}[/]")
-    
-    # Run tool evaluation
-    if 'tools' in analysis_types:
+        return traj_result
+
+    async def run_tools():
         console.print("  [yellow]→[/] Running tool evaluation")
         evaluator = ToolEvaluator()
-        efficiency, tool_results = evaluator.evaluate_tool_chain(trace)
-        results['tools'] = {
+        efficiency, tool_results = await asyncio.to_thread(evaluator.evaluate_tool_chain, trace)
+        tools_result = {
             'efficiency': efficiency,
             'results': [
                 {
@@ -614,13 +949,13 @@ async def analyze_agent_trace(request: AnalysisRequest):
             'correct_count': sum(1 for r in tool_results if r.signal.value == 'correct'),
         }
         console.print(f"    [green]✓[/] Tools: {len(trace.tool_calls)} calls, efficiency=[cyan]{efficiency:.0%}[/]")
-    
-    # Run self-correction detection
-    if 'self_correction' in analysis_types:
+        return tools_result
+
+    async def run_self_correction():
         console.print("  [yellow]→[/] Running self-correction detection")
         detector = SelfCorrectionDetector()
-        result = detector.analyze(trace)
-        results['self_correction'] = {
+        result = await asyncio.to_thread(detector.analyze, trace)
+        sc_result = {
             'detected_error': result.detected_error,
             'correction_attempt': result.correction_attempt,
             'correction_success': result.correction_success,
@@ -630,21 +965,30 @@ async def analyze_agent_trace(request: AnalysisRequest):
             'reason': result.reason,
         }
         console.print(f"    [green]✓[/] Self-correction: awareness=[cyan]{result.self_awareness_score:.0%}[/]")
-    
-    # Run intent drift analysis
-    if 'intent_drift' in analysis_types:
-        console.print("  [yellow]→[/] Running intent drift analysis")
-        meter = IntentDriftMeter()
-        result = meter.analyze(trace)
-        results['intent_drift'] = {
-            'drift_score': result.drift_score,
-            'step_index': result.step_index,
-            'is_legitimate': result.is_legitimate,
-            'reason': result.reason,
-            'drift_history': result.drift_history,
-        }
-        drift_color = "green" if result.drift_score < 0.35 else "yellow" if result.drift_score < 0.6 else "red"
-        console.print(f"    [green]✓[/] Intent drift: score=[{drift_color}]{result.drift_score:.0%}[/] legitimate={result.is_legitimate}")
+        return sc_result
+
+    if 'conversation' in analysis_types:
+        analysis_tasks['conversation'] = asyncio.create_task(run_conversation())
+    if 'trajectory' in analysis_types:
+        analysis_tasks['trajectory'] = asyncio.create_task(run_trajectory())
+    if 'tools' in analysis_types:
+        analysis_tasks['tools'] = asyncio.create_task(run_tools())
+    if 'self_correction' in analysis_types:
+        analysis_tasks['self_correction'] = asyncio.create_task(run_self_correction())
+
+    outcomes = await asyncio.gather(*analysis_tasks.values(), return_exceptions=True)
+
+    errors = []
+    for name, outcome in zip(analysis_tasks.keys(), outcomes):
+        if isinstance(outcome, Exception):
+            errors.append((name, outcome))
+        else:
+            results[name] = outcome
+
+    if errors:
+        first_name, first_error = errors[0]
+        console.print(f"[red]✖[/] Analysis '{first_name}' failed: {first_error}")
+        raise HTTPException(status_code=500, detail=f"Analysis '{first_name}' failed: {first_error}")
     
     # Calculate overall score
     overall_score = 0.0
@@ -669,15 +1013,10 @@ async def analyze_agent_trace(request: AnalysisRequest):
         overall_score += results['self_correction']['correction_efficiency']
         score_count += 1
     
-    if 'intent_drift' in results:
-        overall_score += (1.0 - results['intent_drift']['drift_score'])
-        score_count += 1
-    
     results['overall_score'] = overall_score / score_count if score_count > 0 else 0.0
     results['analysis_types'] = analysis_types
     
-    # Compute per-agent scores for multi-agent sessions
-    session = request.get_session()
+    # Compute per-agent scores for multi-agent sessions (session already defined above)
     agent_scores = compute_per_agent_scores(session, results, trace_input)
     if agent_scores:
         results['per_agent_scores'] = agent_scores.get('per_agent_scores', {})
@@ -709,9 +1048,9 @@ async def analyze_agent_trace_stream(request: AnalysisRequest):
         
         analysis_types = list(request.analysis_types)
         if 'full_all' in analysis_types:
-            analysis_types = ['conversation', 'trajectory', 'tools', 'self_correction', 'intent_drift']
+            analysis_types = ['conversation', 'trajectory', 'tools', 'self_correction']
         elif 'full_agent' in analysis_types:
-            analysis_types = ['trajectory', 'tools', 'self_correction', 'intent_drift']
+            analysis_types = ['trajectory', 'tools', 'self_correction']
         
         total_analyses = len(analysis_types)
         current = 0
@@ -722,12 +1061,14 @@ async def analyze_agent_trace_stream(request: AnalysisRequest):
         results = {}
         
         # Conversation analysis (CCM/RDM/Hallucination) - stream turn by turn
+        # NOW WITH ROLLING CONTEXT to prevent false negatives
         if 'conversation' in analysis_types:
             current += 1
-            turns = trace_input.turns
-            total_turns = len(turns)
+            # Use SESSION turns directly (not converted trace) to preserve all agent interactions
+            session_turns = session.turns
+            total_turns = len(session_turns)
             
-            console.print(f"  [yellow]→[/] [dim][stream][/] Running conversation analysis ({total_turns} turns)")
+            console.print(f"  [yellow]→[/] [dim][stream][/] Running conversation analysis ({total_turns} turns) [bold]with full context[/]")
             yield f"data: {json.dumps({'type': 'progress', 'current': current, 'total': total_analyses, 'analysis': 'conversation', 'status': 'running', 'turn_total': total_turns})}\n\n"
             
             # Initialize detector once
@@ -742,22 +1083,59 @@ async def analyze_agent_trace_stream(request: AnalysisRequest):
             
             # Track results
             turn_results = []
+            turn_summaries = []
             ccm = rdm = llm_judge = hallucination = bad = 0
             
-            # Process turn by turn
-            messages_so_far = []
-            for turn_idx, turn in enumerate(turns):
-                # Build context
-                user_msg = ReAskMessage.user(turn.user_message)
-                assistant_msg = ReAskMessage.assistant(turn.agent_response)
+            # Rolling context for context-aware evaluation
+            rolling_summary = ""
+            
+            # Helper function to build a FULL response from all agent interactions in a turn
+            def build_full_turn_response(turn: TurnInput) -> str:
+                """
+                Build a comprehensive response string from ALL agent interactions.
+                This ensures the context includes executor results, tool outputs, etc.
+                """
+                parts = []
+                for interaction in (turn.agent_interactions or []):
+                    agent_id = interaction.agent_id
+                    # Include agent thoughts and tool results
+                    for step in (interaction.agent_steps or []):
+                        if step.thought:
+                            parts.append(f"[{agent_id}] Thought: {step.thought}")
+                        if step.tool_call:
+                            tc = step.tool_call
+                            if tc.result:
+                                parts.append(f"[{agent_id}] Tool '{tc.tool_name}': {tc.result}")
+                            elif tc.error:
+                                parts.append(f"[{agent_id}] Tool '{tc.tool_name}' error: {tc.error}")
+                    # Include agent's response
+                    if interaction.agent_response:
+                        parts.append(f"[{agent_id}]: {interaction.agent_response}")
+                
+                return "\n".join(parts) if parts else "(no response)"
+            
+            # Process turn by turn WITH FULL CONTEXT
+            for turn_idx, turn in enumerate(session_turns):
+                user_msg_text = turn.user_message or ""
+                # Build FULL response including ALL agents' work
+                full_response = build_full_turn_response(turn)
+                
+                user_msg = ReAskMessage.user(user_msg_text)
+                assistant_msg = ReAskMessage.assistant(full_response)
                 
                 # Get follow-up if exists
                 follow_up = None
                 if turn_idx + 1 < total_turns:
-                    follow_up = ReAskMessage.user(turns[turn_idx + 1].user_message)
+                    next_turn = session_turns[turn_idx + 1]
+                    if next_turn.user_message:
+                        follow_up = ReAskMessage.user(next_turn.user_message)
                 
-                # Evaluate this turn
-                result = detector.evaluate_response(user_msg, assistant_msg, follow_up)
+                # Evaluate this turn WITH CONTEXT
+                result = detector.evaluate_response_with_context(
+                    user_msg, assistant_msg, follow_up,
+                    conversation_context=rolling_summary,
+                    turn_index=turn_idx
+                )
                 
                 detection_type = result.detection_type.value
                 turn_result = {
@@ -766,6 +1144,7 @@ async def analyze_agent_trace_stream(request: AnalysisRequest):
                     'detection_type': detection_type,
                     'confidence': result.confidence,
                     'reason': result.reason,
+                    'context_used': bool(rolling_summary),
                 }
                 turn_results.append(turn_result)
                 
@@ -779,6 +1158,16 @@ async def analyze_agent_trace_stream(request: AnalysisRequest):
                     llm_judge += 1
                 elif detection_type == 'hallucination':
                     hallucination += 1
+                
+                # Generate rolling summary using FULL response
+                summary = detector.generate_turn_summary(
+                    turn_idx, user_msg_text, full_response, rolling_summary
+                )
+                turn_summaries.append({
+                    'turn_index': turn_idx,
+                    **summary
+                })
+                rolling_summary = summary.get('summary', '')
                 
                 console.print(f"    [dim]Turn {turn_idx + 1}/{total_turns}:[/] {'❌' if result.is_bad else '✅'} {detection_type}")
                 
@@ -800,11 +1189,12 @@ async def analyze_agent_trace_stream(request: AnalysisRequest):
                 'llm_judge_detections': llm_judge,
                 'hallucination_detections': hallucination,
                 'results': turn_results,
-                'reason': 'Conversation analysis complete.',
+                'turn_summaries': turn_summaries,  # Include summaries in response
+                'reason': 'Conversation analysis complete (with rolling context).',
                 'avg_confidence': avg_conf,
             }
             results['conversation'] = conv_result
-            console.print(f"    [green]✓[/] Conversation: {bad}/{total_responses} issues")
+            console.print(f"    [green]✓[/] Conversation: {bad}/{total_responses} issues [dim](context-aware)[/]")
             
             yield f"data: {json.dumps({'type': 'result', 'analysis': 'conversation', 'data': results['conversation']})}\n\n"
             await asyncio.sleep(0.01)
@@ -878,27 +1268,6 @@ async def analyze_agent_trace_stream(request: AnalysisRequest):
             yield f"data: {json.dumps({'type': 'result', 'analysis': 'self_correction', 'data': results['self_correction']})}\n\n"
             await asyncio.sleep(0.01)
         
-        # Intent drift
-        if 'intent_drift' in analysis_types:
-            current += 1
-            console.print("  [yellow]→[/] [dim][stream][/] Running intent drift analysis")
-            yield f"data: {json.dumps({'type': 'progress', 'current': current, 'total': total_analyses, 'analysis': 'intent_drift', 'status': 'running'})}\n\n"
-            
-            meter = IntentDriftMeter()
-            result = meter.analyze(trace)
-            results['intent_drift'] = {
-                'drift_score': result.drift_score,
-                'step_index': result.step_index,
-                'is_legitimate': result.is_legitimate,
-                'reason': result.reason,
-                'drift_history': result.drift_history,
-            }
-            drift_color = "green" if result.drift_score < 0.35 else "yellow" if result.drift_score < 0.6 else "red"
-            console.print(f"    [green]✓[/] Intent drift: score=[{drift_color}]{result.drift_score:.0%}[/] legitimate={result.is_legitimate}")
-            
-            yield f"data: {json.dumps({'type': 'result', 'analysis': 'intent_drift', 'data': results['intent_drift']})}\n\n"
-            await asyncio.sleep(0.01)
-        
         # Calculate overall score
         overall_score = 0.0
         score_count = 0
@@ -920,10 +1289,6 @@ async def analyze_agent_trace_stream(request: AnalysisRequest):
         
         if 'self_correction' in results:
             overall_score += results['self_correction']['correction_efficiency']
-            score_count += 1
-        
-        if 'intent_drift' in results:
-            overall_score += (1.0 - results['intent_drift']['drift_score'])
             score_count += 1
         
         results['overall_score'] = overall_score / score_count if score_count > 0 else 0.0
@@ -1018,25 +1383,6 @@ async def analyze_self_correction(request: AgentTraceInput):
     }
 
 
-@router.post("/agent/intent-drift")
-async def analyze_intent_drift(request: AgentTraceInput):
-    """Quick endpoint for intent drift analysis only"""
-    console.print(f"[bold magenta]🎯 Intent drift analysis:[/] {len(request.steps)} steps")
-    trace = convert_to_agent_trace(request)
-    meter = IntentDriftMeter()
-    result = meter.analyze(trace)
-    drift_color = "green" if result.drift_score < 0.35 else "yellow" if result.drift_score < 0.6 else "red"
-    console.print(f"  [green]✓[/] drift=[{drift_color}]{result.drift_score:.0%}[/] legitimate={result.is_legitimate}")
-    
-    return {
-        'drift_score': result.drift_score,
-        'step_index': result.step_index,
-        'is_legitimate': result.is_legitimate,
-        'reason': result.reason,
-        'drift_history': result.drift_history,
-    }
-
-
 # ============================================
 # Database Persistence Endpoints
 # ============================================
@@ -1046,6 +1392,18 @@ class SaveAnalysisRequest(BaseModel):
     session: Optional[AgentSessionInput] = None  # Multi-agent format
     results: dict
     name: Optional[str] = None
+    
+    def is_multi_agent(self) -> bool:
+        """Check if this is a multi-agent session"""
+        return self.session is not None
+    
+    def get_session(self) -> AgentSessionInput:
+        """Get session input, converting from trace if needed"""
+        if self.session:
+            return self.session
+        if self.trace:
+            return self.trace.to_session()
+        raise ValueError("Either trace or session must be provided")
     
     def get_trace(self) -> AgentTraceInput:
         """Get trace input, converting from session if needed"""
@@ -1069,79 +1427,107 @@ class SavedTraceResponse(BaseModel):
 
 @router.post("/agent/traces", response_model=SavedTraceResponse)
 async def save_agent_trace(request: SaveAnalysisRequest, db: Session = Depends(get_db)):
-    """Save an analyzed agent trace to the database"""
-    trace_input = request.get_trace()
+    """Save an analyzed agent trace to the database - supports both single and multi-agent formats"""
+    is_multi_agent = request.is_multi_agent()
+    session_input = request.get_session()  # Always work with session format internally
     results = request.results
     
     # Get task from initial_task or first turn
-    task_desc = trace_input.initial_task or (trace_input.turns[0].user_message if trace_input.turns else "Agent Trace")
-    console.print(f"[bold blue]💾 Saving trace:[/] '{task_desc[:50]}...'")
+    task_desc = session_input.initial_task or ""
+    if not task_desc and session_input.turns:
+        task_desc = session_input.turns[0].user_message or "Agent Trace"
+    console.print(f"[bold blue]💾 Saving trace:[/] '{task_desc[:50]}...' ({'multi-agent' if is_multi_agent else 'single-agent'})")
     
-    # Create the session record (no analysis fields - those go in AgentAnalysis)
+    # Create the session record
     db_session = AgentSession(
         name=request.name or task_desc[:100],
-        initial_task=trace_input.initial_task,
-        success=trace_input.success,
-        total_cost=trace_input.total_cost,
+        initial_task=session_input.initial_task,
+        success=session_input.success,
+        total_cost=session_input.total_cost,
     )
     db.add(db_session)
     db.flush()
     
-    # Create a default agent definition (single-agent trace)
-    db_agent = AgentDefinition(
-        session_id=db_session.id,
-        agent_id="agent",
-        name="Agent",
-        role="primary",
-    )
-    db.add(db_agent)
-    db.flush()
+    # Create agent definitions - store all agents for multi-agent, or default for single
+    agent_def_map = {}  # agent_id -> db_agent
+    agents_to_save = session_input.agents or [AgentDef(id="agent", name="Agent", role="primary")]
     
-    # Add turns and their steps
+    for agent in agents_to_save:
+        db_agent = AgentDefinition(
+            session_id=db_session.id,
+            agent_id=agent.id,
+            name=agent.name or agent.id,
+            role=agent.role,
+            description=agent.description,
+            capabilities_json=json.dumps(agent.capabilities) if agent.capabilities else None,
+            tools_available_json=json.dumps([t.dict() for t in agent.tools_available]) if agent.tools_available else None,
+        )
+        db.add(db_agent)
+        db.flush()
+        agent_def_map[agent.id] = db_agent
+    
+    # Add turns and their interactions/steps
     total_steps = 0
-    for turn_idx, turn in enumerate(trace_input.turns):
+    for turn_idx, turn in enumerate(session_input.turns):
+        # Get final response from the last interaction that has one
+        final_response = None
+        responding_agent_id = None
+        for interaction in reversed(turn.agent_interactions or []):
+            if interaction.agent_response:
+                final_response = interaction.agent_response
+                responding_agent_id = interaction.agent_id
+                break
+        
         db_turn = SessionTurn(
             session_id=db_session.id,
-            turn_index=turn_idx,
+            turn_index=turn.turn_index if turn.turn_index is not None else turn_idx,
             user_message=turn.user_message,
-            final_response=turn.agent_response,
-            responding_agent_id="agent",
+            final_response=final_response,
+            responding_agent_id=responding_agent_id,
         )
         db.add(db_turn)
         db.flush()
         
-        # Create interaction for this turn
-        db_interaction = AgentInteraction(
-            turn_id=db_turn.id,
-            agent_def_id=db_agent.id,
-            sequence=0,
-            agent_id="agent",
-            agent_response=turn.agent_response,
-        )
-        db.add(db_interaction)
-        db.flush()
-        
-        # Add steps for this turn under the interaction
-        for step_idx, step in enumerate(turn.agent_steps or []):
-            # Determine step type
-            if step.tool_call:
-                step_type = "tool_call"
-            elif step.thought:
-                step_type = "thought"
-            else:
-                step_type = "action"
+        # Create interactions for each agent in this turn
+        for seq, interaction in enumerate(turn.agent_interactions or []):
+            agent_def = agent_def_map.get(interaction.agent_id)
             
-            db_step = AgentStepDB(
-                interaction_id=db_interaction.id,
-                step_index=step_idx,
-                step_type=step_type,
-                content=step.thought or step.action,
-                tool_name=step.tool_call.tool_name if step.tool_call else None,
-                tool_parameters_json=json.dumps(step.tool_call.parameters) if step.tool_call and step.tool_call.parameters else None,
-                tool_result=step.tool_call.result if step.tool_call else None,
+            db_interaction = AgentInteraction(
+                turn_id=db_turn.id,
+                agent_def_id=agent_def.id if agent_def else None,
+                sequence=seq,
+                agent_id=interaction.agent_id,
+                agent_response=interaction.agent_response,
+                latency_ms=interaction.latency_ms,
             )
-            db.add(db_step)
-            total_steps += 1
+            db.add(db_interaction)
+            db.flush()
+            
+            # Add steps for this interaction
+            for step_idx, step in enumerate(interaction.agent_steps or []):
+                # Determine step type
+                if step.tool_call:
+                    step_type = "tool_call"
+                elif step.thought:
+                    step_type = "thought"
+                elif step.observation:
+                    step_type = "observation"
+                else:
+                    step_type = "action"
+                
+                tool_call = step.tool_call
+                db_step = AgentStepDB(
+                    interaction_id=db_interaction.id,
+                    step_index=step_idx,
+                    step_type=step_type,
+                    content=step.thought or step.action or step.observation,
+                    tool_name=tool_call.tool_name if tool_call else None,
+                    tool_parameters_json=json.dumps(tool_call.parameters) if tool_call and tool_call.parameters else None,
+                    tool_result=tool_call.result if tool_call else None,
+                    tool_error=tool_call.error if tool_call else None,
+                )
+                db.add(db_step)
+                total_steps += 1
     
     # Create analysis record with results
     db_analysis = AgentAnalysis(
@@ -1153,7 +1539,8 @@ async def save_agent_trace(request: SaveAnalysisRequest, db: Session = Depends(g
         trajectory_result_json=json.dumps(results.get('trajectory')) if results.get('trajectory') else None,
         tools_result_json=json.dumps(results.get('tools')) if results.get('tools') else None,
         self_correction_result_json=json.dumps(results.get('self_correction')) if results.get('self_correction') else None,
-        intent_drift_result_json=json.dumps(results.get('intent_drift')) if results.get('intent_drift') else None,
+        per_agent_scores_json=json.dumps(results.get('per_agent_scores')) if results.get('per_agent_scores') else None,
+        coordination_score=results.get('coordination_score'),
     )
     db.add(db_analysis)
     
@@ -1161,7 +1548,7 @@ async def save_agent_trace(request: SaveAnalysisRequest, db: Session = Depends(g
     db.refresh(db_session)
     db.refresh(db_analysis)
     
-    console.print(f"  [green]✓[/] Saved as ID=[bold]{db_session.id}[/] with {len(trace_input.turns)} turns, {total_steps} steps")
+    console.print(f"  [green]✓[/] Saved as ID=[bold]{db_session.id}[/] with {len(session_input.turns)} turns, {total_steps} steps, {len(agents_to_save)} agents")
     
     return SavedTraceResponse(
         id=db_session.id,
@@ -1208,7 +1595,7 @@ async def list_agent_traces(db: Session = Depends(get_db), limit: int = 50, offs
 
 @router.get("/agent/traces/{trace_id}")
 async def get_agent_trace(trace_id: int, db: Session = Depends(get_db)):
-    """Get a specific agent trace with all details and latest analysis"""
+    """Get a specific agent trace with all details and latest analysis - preserves multi-agent format"""
     console.print(f"[dim]🔍 Getting trace ID={trace_id}[/]")
     trace = db.query(AgentTraceDB).filter(AgentTraceDB.id == trace_id).first()
     
@@ -1216,33 +1603,73 @@ async def get_agent_trace(trace_id: int, db: Session = Depends(get_db)):
         console.print(f"  [red]✗[/] Trace not found")
         raise HTTPException(status_code=404, detail="Trace not found")
     
-    # Rebuild turns with steps
+    # Get agent definitions to determine if multi-agent
+    agent_defs = db.query(AgentDefinition).filter(AgentDefinition.session_id == trace_id).all()
+    is_multi_agent = len(agent_defs) > 1 or (len(agent_defs) == 1 and agent_defs[0].agent_id != "agent")
+    
+    # Build agents array
+    agents = []
+    for agent_def in agent_defs:
+        agent = {
+            'id': agent_def.agent_id,
+            'name': agent_def.name,
+            'role': agent_def.role,
+        }
+        if agent_def.description:
+            agent['description'] = agent_def.description
+        if agent_def.capabilities_json:
+            agent['capabilities'] = json.loads(agent_def.capabilities_json)
+        if agent_def.tools_available_json:
+            agent['tools_available'] = json.loads(agent_def.tools_available_json)
+        agents.append(agent)
+    
+    # Rebuild turns - multi-agent format with agent_interactions
     turns = []
     for db_turn in trace.turns:
-        # Rebuild steps for this turn from interactions
-        agent_steps = []
-        for interaction in db_turn.interactions:
-            for step in interaction.steps:
-                tool_call = None
+        # Sort interactions by sequence
+        sorted_interactions = sorted(db_turn.interactions, key=lambda x: x.sequence or 0)
+        
+        agent_interactions = []
+        for interaction in sorted_interactions:
+            # Build steps for this interaction
+            steps = []
+            for step in sorted(interaction.steps, key=lambda x: x.step_index):
+                step_data = {}
+                if step.step_type == 'thought' and step.content:
+                    step_data['thought'] = step.content
+                elif step.step_type == 'action' and step.content:
+                    step_data['action'] = step.content
+                elif step.step_type == 'observation' and step.content:
+                    step_data['observation'] = step.content
+                
                 if step.step_type == 'tool_call' and step.tool_name:
-                    tool_call = {
-                        'name': step.tool_name,
+                    step_data['tool_call'] = {
+                        'tool_name': step.tool_name,
                         'parameters': json.loads(step.tool_parameters_json) if step.tool_parameters_json else {},
                         'result': step.tool_result,
                         'error': step.tool_error,
                     }
-                agent_steps.append({
-                    'thought': step.content if step.step_type == 'thought' else None,
-                    'action': step.content if step.step_type == 'action' else None,
-                    'observation': step.content if step.step_type == 'observation' else None,
-                    'tool_call': tool_call,
-                })
+                
+                if step_data:
+                    steps.append(step_data)
+            
+            interaction_data = {
+                'agent_id': interaction.agent_id,
+                'agent_steps': steps,
+            }
+            if interaction.agent_response:
+                interaction_data['agent_response'] = interaction.agent_response
+            if interaction.latency_ms:
+                interaction_data['latency_ms'] = interaction.latency_ms
+            
+            agent_interactions.append(interaction_data)
         
-        turns.append({
+        turn_data = {
+            'turn_index': db_turn.turn_index,
             'user_message': db_turn.user_message,
-            'agent_response': db_turn.final_response,
-            'agent_steps': agent_steps,
-        })
+            'agent_interactions': agent_interactions,
+        }
+        turns.append(turn_data)
     
     # Get latest completed analysis
     latest_analysis = db.query(AnalysisJobDB).filter(
@@ -1265,16 +1692,19 @@ async def get_agent_trace(trace_id: int, db: Session = Depends(get_db)):
             results['tools'] = json.loads(latest_analysis.tools_result_json)
         if latest_analysis.self_correction_result_json:
             results['self_correction'] = json.loads(latest_analysis.self_correction_result_json)
-        if latest_analysis.intent_drift_result_json:
-            results['intent_drift'] = json.loads(latest_analysis.intent_drift_result_json)
+        if hasattr(latest_analysis, 'per_agent_scores_json') and latest_analysis.per_agent_scores_json:
+            results['per_agent_scores'] = json.loads(latest_analysis.per_agent_scores_json)
+        if hasattr(latest_analysis, 'coordination_score') and latest_analysis.coordination_score:
+            results['coordination_score'] = latest_analysis.coordination_score
     
-    console.print(f"  [green]✓[/] Found trace with {len(turns)} turns")
+    console.print(f"  [green]✓[/] Found trace with {len(turns)} turns, {len(agents)} agents")
     
     return {
         'id': trace.id,
         'name': trace.name,
         'created_at': trace.created_at.isoformat(),
         'trace': {
+            'agents': agents,
             'initial_task': trace.initial_task,
             'turns': turns,
             'success': trace.success,
@@ -1463,9 +1893,9 @@ def run_background_analysis(analysis_id: int, resume_from: int = 0):
         # Get analysis types
         analysis_types = json.loads(analysis.analysis_types_json)
         if 'full_all' in analysis_types:
-            analysis_types = ['conversation', 'trajectory', 'tools', 'self_correction', 'intent_drift']
+            analysis_types = ['conversation', 'trajectory', 'tools', 'self_correction']
         elif 'full_agent' in analysis_types:
-            analysis_types = ['trajectory', 'tools', 'self_correction', 'intent_drift']
+            analysis_types = ['trajectory', 'tools', 'self_correction']
         
         # Update status
         analysis.status = "running"
@@ -1522,7 +1952,7 @@ def run_background_analysis(analysis_id: int, resume_from: int = 0):
         
         results = {}
         
-        # Run conversation analysis with REAL-TIME turn saving
+        # Run conversation analysis with REAL-TIME turn saving and ROLLING CONTEXT
         if 'conversation' in analysis_types:
             analysis.current_step += 1
             analysis.current_analysis = "conversation"
@@ -1538,7 +1968,29 @@ def run_background_analysis(analysis_id: int, resume_from: int = 0):
             )
             
             turn_results = []
+            turn_summaries = []
             ccm = rdm = llm_judge = hallucination = bad = 0
+            rolling_summary = ""
+            
+            # Helper to build full response from DB turn (includes ALL agent interactions)
+            def build_full_response_from_db(db_turn) -> str:
+                parts = []
+                sorted_interactions = sorted(db_turn.interactions, key=lambda x: x.sequence or 0)
+                for interaction in sorted_interactions:
+                    agent_id = interaction.agent_id
+                    # Include steps
+                    for step in sorted(interaction.steps, key=lambda x: x.step_index):
+                        if step.step_type == 'thought' and step.content:
+                            parts.append(f"[{agent_id}] Thought: {step.content}")
+                        if step.step_type == 'tool_call' and step.tool_name:
+                            if step.tool_result:
+                                parts.append(f"[{agent_id}] Tool '{step.tool_name}': {step.tool_result}")
+                            elif step.tool_error:
+                                parts.append(f"[{agent_id}] Tool '{step.tool_name}' error: {step.tool_error}")
+                    # Include response
+                    if interaction.agent_response:
+                        parts.append(f"[{agent_id}]: {interaction.agent_response}")
+                return "\n".join(parts) if parts else (db_turn.final_response or "(no response)")
             
             for turn_idx, db_turn in enumerate(turns):
                 # Check if already analyzed (for retry)
@@ -1547,8 +1999,12 @@ def run_background_analysis(analysis_id: int, resume_from: int = 0):
                     TurnAnalysisResult.turn_id == db_turn.id
                 ).first()
                 
+                # Build full response for this turn
+                full_response = build_full_response_from_db(db_turn)
+                user_msg_text = db_turn.user_message or ""
+                
                 if existing and turn_idx < resume_from:
-                    # Use existing result
+                    # Use existing result but still update rolling summary
                     turn_result = {
                         'step_index': turn_idx,
                         'is_bad': existing.is_bad,
@@ -1567,15 +2023,33 @@ def run_background_analysis(analysis_id: int, resume_from: int = 0):
                         llm_judge += 1
                     elif existing.detection_type == 'hallucination':
                         hallucination += 1
+                    
+                    # Still generate summary for context continuity
+                    summary = detector.generate_turn_summary(
+                        turn_idx, user_msg_text, full_response, rolling_summary
+                    )
+                    rolling_summary = summary.get('summary', '')
+                    turn_summaries.append({'turn_index': turn_idx, **summary})
                     continue
                 
-                # Analyze this turn
-                user_msg = ReAskMessage.user(db_turn.user_message)
-                assistant_msg = ReAskMessage.assistant(db_turn.final_response or "")
+                # Analyze this turn WITH CONTEXT
+                user_msg = ReAskMessage.user(user_msg_text)
+                assistant_msg = ReAskMessage.assistant(full_response)
                 follow_up = ReAskMessage.user(turns[turn_idx + 1].user_message) if turn_idx + 1 < len(turns) else None
                 
-                result = detector.evaluate_response(user_msg, assistant_msg, follow_up)
+                result = detector.evaluate_response_with_context(
+                    user_msg, assistant_msg, follow_up,
+                    conversation_context=rolling_summary,
+                    turn_index=turn_idx
+                )
                 detection_type = result.detection_type.value
+                
+                # Generate rolling summary for next turn
+                summary = detector.generate_turn_summary(
+                    turn_idx, user_msg_text, full_response, rolling_summary
+                )
+                rolling_summary = summary.get('summary', '')
+                turn_summaries.append({'turn_index': turn_idx, **summary})
                 
                 # SAVE IMMEDIATELY to TurnAnalysisResult
                 if existing:
@@ -1633,11 +2107,13 @@ def run_background_analysis(analysis_id: int, resume_from: int = 0):
                 'llm_judge_detections': llm_judge,
                 'hallucination_detections': hallucination,
                 'results': turn_results,
-                'reason': 'Conversation analysis complete.',
+                'turn_summaries': turn_summaries,
+                'reason': 'Conversation analysis complete (with rolling context).',
                 'avg_confidence': avg_conf,
             }
             results['conversation'] = conv_result
             analysis.conversation_result_json = json.dumps(conv_result)
+            console.print(f"    [green]✓[/] Conversation: {bad}/{total_responses} issues [dim](context-aware)[/]")
             db.commit()
         
         # Run trajectory analysis
@@ -1698,25 +2174,6 @@ def run_background_analysis(analysis_id: int, resume_from: int = 0):
             analysis.self_correction_result_json = json.dumps(sc_result)
             db.commit()
         
-        # Run intent drift analysis
-        if 'intent_drift' in analysis_types:
-            analysis.current_step += 1
-            analysis.current_analysis = "intent_drift"
-            db.commit()
-            
-            meter = IntentDriftMeter()
-            result = meter.analyze(trace)
-            drift_result = {
-                'drift_score': result.drift_score,
-                'step_index': result.step_index,
-                'is_legitimate': result.is_legitimate,
-                'reason': result.reason,
-                'drift_history': result.drift_history,
-            }
-            results['intent_drift'] = drift_result
-            analysis.intent_drift_result_json = json.dumps(drift_result)
-            db.commit()
-        
         # Calculate overall score
         overall_score = 0.0
         score_count = 0
@@ -1740,9 +2197,6 @@ def run_background_analysis(analysis_id: int, resume_from: int = 0):
             overall_score += results['self_correction']['correction_efficiency']
             score_count += 1
         
-        if 'intent_drift' in results:
-            overall_score += (1.0 - results['intent_drift']['drift_score'])
-            score_count += 1
         
         overall_score = overall_score / score_count if score_count > 0 else 0.0
         
@@ -1936,7 +2390,6 @@ async def get_job_status(job_id: int, db: Session = Depends(get_db)):
             'trajectory': json.loads(analysis.trajectory_result_json) if analysis.trajectory_result_json else None,
             'tools': json.loads(analysis.tools_result_json) if analysis.tools_result_json else None,
             'self_correction': json.loads(analysis.self_correction_result_json) if analysis.self_correction_result_json else None,
-            'intent_drift': json.loads(analysis.intent_drift_result_json) if analysis.intent_drift_result_json else None,
             'overall_score': analysis.overall_score,
             'analysis_types': json.loads(analysis.analysis_types_json) if analysis.analysis_types_json else [],
         }

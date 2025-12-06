@@ -5,8 +5,7 @@ Features demonstrated:
 1. Agent Trajectory Analysis (ATA) - Detect circular patterns, regressions
 2. Tool Use Quality Metrics (TUM) - Evaluate tool selection and parameters
 3. Self-Correction Detection (SCD) - Measure self-awareness and recovery
-4. Intent Drift Meter (IDM) - Track alignment with original task
-5. Comparative Agent Benchmarking (CAB) - A/B test multiple agents
+4. Comparative Agent Benchmarking (CAB) - A/B test multiple agents
 """
 
 from rich.console import Console
@@ -22,7 +21,6 @@ from reask import (
     TrajectoryAnalyzer,
     ToolEvaluator,
     SelfCorrectionDetector,
-    IntentDriftMeter,
     # Benchmarking
     AgentBenchmark,
     BenchmarkTask,
@@ -223,80 +221,9 @@ def example_self_correction():
     ))
 
 
-def example_intent_drift():
-    """Example 4: Intent Drift - Track task alignment"""
-    display_section("4. Intent Drift Meter (IDM)")
-    
-    # Create trace with intent drift
-    trace = AgentTrace(task="Refactor the auth module to use JWT tokens")
-    
-    trace.add_step(AgentStep(
-        index=0,
-        thought="Reading the current auth module",
-        action="Open auth/login.py",
-        observation="Found session-based auth implementation"
-    ))
-    trace.add_step(AgentStep(
-        index=1,
-        thought="I should add JWT support",
-        action="Creating jwt_handler.py",
-        observation="Added JWT encode/decode functions"
-    ))
-    trace.add_step(AgentStep(
-        index=2,
-        thought="While I'm here, the logging could be better",
-        action="Refactoring logging system",
-        observation="Added structured logging throughout"
-    ))
-    trace.add_step(AgentStep(
-        index=3,
-        thought="The database queries are slow, let me optimize them",
-        action="Adding database indexes",
-        observation="Created 5 new indexes on user table"
-    ))
-    trace.add_step(AgentStep(
-        index=4,
-        thought="Actually, let me rewrite the entire user service",
-        action="Complete rewrite of user_service.py",
-        observation="New microservice architecture implemented"
-    ))
-    
-    console.print(Panel(
-        f"Task: {trace.task}\n"
-        f"Steps: {trace.step_count}\n"
-        f"[dim]Agent starts on task but gradually drifts to other work[/dim]",
-        title="📋 Drift Trace"
-    ))
-    
-    # Measure drift
-    meter = IntentDriftMeter()
-    
-    with console.status("[bold green]Measuring intent drift..."):
-        result = meter.analyze(trace)
-    
-    # Display drift history
-    drift_viz = ""
-    for i, drift in enumerate(result.drift_history):
-        bar_len = int(drift * 20)
-        color = "green" if drift < 0.35 else ("yellow" if drift < 0.6 else "red")
-        drift_viz += f"Step {i}: [{color}]{'█' * bar_len}{'░' * (20 - bar_len)}[/{color}] {drift:.2f}\n"
-    
-    console.print(Panel(drift_viz, title="📊 Drift per Step"))
-    
-    # Summary
-    color = "green" if result.drift_score < 0.35 else ("yellow" if result.drift_score < 0.6 else "red")
-    console.print(Panel(
-        f"Max Drift: [{color}]{result.drift_score:.2f}[/{color}] (at step {result.step_index})\n"
-        f"Legitimate: {'✅' if result.is_legitimate else '❌'}\n\n"
-        f"[dim]{result.reason}[/dim]",
-        title="🎯 Intent Drift Summary",
-        border_style=color
-    ))
-
-
 def example_benchmarking():
-    """Example 5: Agent Benchmarking - Compare multiple agents"""
-    display_section("5. Comparative Agent Benchmarking (CAB)")
+    """Example 4: Agent Benchmarking - Compare multiple agents"""
+    display_section("4. Comparative Agent Benchmarking (CAB)")
     
     # Create mock agents with different behaviors
     def good_agent_fn(task: str) -> AgentTrace:
@@ -378,7 +305,6 @@ def example_benchmarking():
     table.add_column("Trajectory", justify="right")
     table.add_column("Tools", justify="right")
     table.add_column("Self-Correct", justify="right")
-    table.add_column("Drift", justify="right")
     table.add_column("Cost", justify="right")
     table.add_column("Steps", justify="center")
     
@@ -393,7 +319,6 @@ def example_benchmarking():
             f"{r.trajectory_score:.2f}",
             f"{r.tool_accuracy:.2f}",
             f"{r.self_correction_score:.2f}",
-            f"{r.intent_drift:.2f}",
             f"${r.total_cost:.4f}",
             str(r.step_count)
         )
@@ -426,7 +351,6 @@ def main():
     example_trajectory_analysis()
     example_tool_evaluation()
     example_self_correction()
-    example_intent_drift()
     example_benchmarking()
     
     console.print()
