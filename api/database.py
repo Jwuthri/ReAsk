@@ -1,9 +1,27 @@
-"""Database setup and models for ReAsk API"""
+"""
+Clean Database Schema for ReAsk API
+
+Structure:
+- Dataset: Container for evaluation data (from API payload)
+  - Has 1 Agent list (shared across all conversations)
+  - Has N Conversations
+  - Has N Analyses
+
+- Conversation: A conversation thread within a dataset (maps to "turn" in old schema)
+  - Has N Messages
+
+- Message: A single message (user or assistant interaction in a conversation)
+  - Has N Steps (for messages with reasoning/tool calls)
+
+- Analysis: An evaluation run on a Dataset
+  - Produces ConversationResult, MessageResult, StepResult
+"""
 
 from datetime import datetime
-from enum import Enum
-from typing import Optional
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, Index
+from sqlalchemy import (
+    create_engine, Column, Integer, String, Float, Boolean, 
+    DateTime, ForeignKey, Text, Index, JSON
+)
 from sqlalchemy.orm import sessionmaker, relationship, declarative_base
 
 DATABASE_URL = "sqlite:///./reask_data.db"
@@ -14,402 +32,307 @@ Base = declarative_base()
 
 
 # ============================================
-# Dataset Models (for CSV/JSON uploads)
+# Core Data Models
 # ============================================
 
 class Dataset(Base):
-    """A dataset uploaded by the user (CSV or JSON file)"""
+    """
+    A dataset containing conversations to evaluate.
+    This is the top-level container for all data.
+    """
     __tablename__ = "datasets"
     
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(255), nullable=False)
-    file_type = Column(String(10), nullable=False)  # csv or json
-    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    name = Column(String(255), nullable=True)
+    task = Column(Text, nullable=True)  # Initial task/goal
+    
+    # Metrics
+    total_cost = Column(Float, nullable=True)
+    total_latency_ms = Column(Integer, nullable=True)
+    success = Column(Boolean, nullable=True)
+    
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    metadata_json = Column(JSON, nullable=True)
     
     # Relationships
-    conversations = relationship("Conversation", back_populates="dataset", cascade="all, delete-orphan")
-    analyses = relationship("DatasetAnalysis", back_populates="dataset", cascade="all, delete-orphan")
+    agents = relationship("Agent", back_populates="dataset", cascade="all, delete-orphan")
+    conversations = relationship("Conversation", back_populates="dataset", cascade="all, delete-orphan", order_by="Conversation.conversation_index")
+    analyses = relationship("Analysis", back_populates="dataset", cascade="all, delete-orphan")
+
+
+class Agent(Base):
+    """
+    Definition of an agent in a dataset.
+    All conversations in the dataset share these agent definitions.
+    """
+    __tablename__ = "agents"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    dataset_id = Column(Integer, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False)
+    
+    agent_id = Column(String(100), nullable=False)  # e.g., "planner", "executor"
+    name = Column(String(255), nullable=True)
+    role = Column(String(100), nullable=True)
+    description = Column(Text, nullable=True)
+    capabilities_json = Column(JSON, nullable=True)
+    tools_available_json = Column(JSON, nullable=True)
+    config_json = Column(JSON, nullable=True)
+    
+    dataset = relationship("Dataset", back_populates="agents")
 
 
 class Conversation(Base):
-    """A conversation within a dataset"""
+    """
+    A conversation within a dataset.
+    Each conversation represents one user interaction thread.
+    """
     __tablename__ = "conversations"
     
     id = Column(Integer, primary_key=True, index=True)
     dataset_id = Column(Integer, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False)
-    conversation_id = Column(String(255), nullable=False)  # Original ID from file
+    
+    conversation_index = Column(Integer, nullable=False)  # 0, 1, 2...
+    user_input = Column(Text, nullable=True)  # The user's input
+    final_response = Column(Text, nullable=True)  # Final response to user
+    responding_agent_id = Column(String(100), nullable=True)
     
     dataset = relationship("Dataset", back_populates="conversations")
-    messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan", order_by="Message.index")
+    messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan", order_by="Message.sequence")
+    results = relationship("ConversationResult", back_populates="conversation", cascade="all, delete-orphan")
 
 
 class Message(Base):
-    """A message in a conversation"""
+    """
+    A message in a conversation.
+    Each message represents one agent's contribution.
+    """
     __tablename__ = "messages"
     
     id = Column(Integer, primary_key=True, index=True)
     conversation_id = Column(Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False)
-    index = Column(Integer, nullable=False)
-    role = Column(String(20), nullable=False)  # user or assistant
-    content = Column(Text, nullable=False)
-    knowledge = Column(Text, nullable=True)
+    agent_id = Column(String(100), nullable=False)  # Which agent produced this
+    
+    sequence = Column(Integer, nullable=False)  # Order in conversation
+    content = Column(Text, nullable=True)  # The message content/response
+    
+    # For tool execution results
+    tool_execution_json = Column(JSON, nullable=True)
+    
+    # Performance
+    latency_ms = Column(Integer, nullable=True)
+    token_count = Column(Integer, nullable=True)
     
     conversation = relationship("Conversation", back_populates="messages")
-    eval_result = relationship("MessageAnalysisResult", back_populates="message", uselist=False, cascade="all, delete-orphan")
+    steps = relationship("Step", back_populates="message", cascade="all, delete-orphan", order_by="Step.step_index")
+    results = relationship("MessageResult", back_populates="message", cascade="all, delete-orphan")
 
 
-class DatasetAnalysis(Base):
-    """An analysis run on a dataset"""
-    __tablename__ = "dataset_analyses"
+class Step(Base):
+    """
+    A step within a message.
+    Captures reasoning, tool calls, observations.
+    """
+    __tablename__ = "steps"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(Integer, ForeignKey("messages.id", ondelete="CASCADE"), nullable=False)
+    
+    step_index = Column(Integer, nullable=False)
+    step_type = Column(String(50), nullable=False)  # thought, tool_call, action, observation
+    content = Column(Text, nullable=True)
+    
+    # Tool call details
+    tool_name = Column(String(100), nullable=True)
+    tool_parameters_json = Column(JSON, nullable=True)
+    tool_result = Column(Text, nullable=True)
+    tool_error = Column(Text, nullable=True)
+    
+    # Performance
+    latency_ms = Column(Integer, nullable=True)
+    
+    message = relationship("Message", back_populates="steps")
+    results = relationship("StepResult", back_populates="step", cascade="all, delete-orphan")
+
+
+# ============================================
+# Analysis Models
+# ============================================
+
+class Analysis(Base):
+    """
+    An analysis run on a dataset.
+    """
+    __tablename__ = "analyses"
     
     id = Column(Integer, primary_key=True, index=True)
     dataset_id = Column(Integer, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False)
+    
     status = Column(String(20), nullable=False, default="pending")
+    analysis_types_json = Column(JSON, nullable=False)
+    
+    # Timing
     created_at = Column(DateTime, default=datetime.utcnow)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     
     # Progress
-    total_messages = Column(Integer, default=0)
-    analyzed_messages = Column(Integer, default=0)
-    
-    # Results summary
-    total_responses = Column(Integer, nullable=True)
-    bad_responses = Column(Integer, nullable=True)
-    ccm_detections = Column(Integer, nullable=True)
-    rdm_detections = Column(Integer, nullable=True)
-    llm_judge_detections = Column(Integer, nullable=True)
-    hallucination_detections = Column(Integer, nullable=True)
-    
-    error_message = Column(Text, nullable=True)
-    
-    dataset = relationship("Dataset", back_populates="analyses")
-    message_results = relationship("MessageAnalysisResult", back_populates="analysis", cascade="all, delete-orphan")
-
-
-class MessageAnalysisResult(Base):
-    """Analysis result for a single message (saved in real-time)"""
-    __tablename__ = "message_analysis_results"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    analysis_id = Column(Integer, ForeignKey("dataset_analyses.id", ondelete="CASCADE"), nullable=False)
-    message_id = Column(Integer, ForeignKey("messages.id", ondelete="CASCADE"), nullable=False)
-    
-    is_bad = Column(Boolean, nullable=False)
-    detection_type = Column(String(20), nullable=False)
-    confidence = Column(Float, nullable=False)
-    reason = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    analysis = relationship("DatasetAnalysis", back_populates="message_results")
-    message = relationship("Message", back_populates="eval_result")
-    
-    __table_args__ = (
-        Index('ix_message_analysis_unique', 'analysis_id', 'message_id', unique=True),
-    )
-
-
-# ============================================
-# Multi-Agent Session Models
-# ============================================
-
-class AgentSession(Base):
-    """A multi-agent session - the main container"""
-    __tablename__ = "agent_sessions"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(255), nullable=True)
-    initial_task = Column(Text, nullable=True)
-    success = Column(Boolean, nullable=True)
-    
-    # Session metadata
-    timestamp = Column(DateTime, default=datetime.utcnow)
-    total_cost = Column(Float, nullable=True)
-    total_latency_ms = Column(Integer, nullable=True)  # Total session latency in ms
-    metadata_json = Column(Text, nullable=True)  # Extra metadata as JSON
-    
-    # Analysis results (stored as JSON strings)
-    overall_score = Column(Float, nullable=True)
-    analysis_types = Column(Text, nullable=True)  # JSON array of analysis types run
-    conversation_result = Column(Text, nullable=True)  # JSON
-    trajectory_result = Column(Text, nullable=True)  # JSON
-    tools_result = Column(Text, nullable=True)  # JSON
-    self_correction_result = Column(Text, nullable=True)  # JSON
-    
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    # Relationships
-    agents = relationship("AgentDefinition", back_populates="session", cascade="all, delete-orphan")
-    turns = relationship("SessionTurn", back_populates="session", cascade="all, delete-orphan", order_by="SessionTurn.turn_index")
-    analyses = relationship("AgentAnalysis", back_populates="session", cascade="all, delete-orphan")
-
-
-class AgentDefinition(Base):
-    """Definition of an agent in a session"""
-    __tablename__ = "agent_definitions"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("agent_sessions.id", ondelete="CASCADE"), nullable=False)
-    
-    agent_id = Column(String(100), nullable=False)  # e.g., "agent1"
-    name = Column(String(255), nullable=True)  # e.g., "ReasoningAgent"
-    role = Column(String(100), nullable=True)  # e.g., "primary_reasoner"
-    description = Column(Text, nullable=True)
-    capabilities_json = Column(Text, nullable=True)  # JSON array
-    tools_available_json = Column(Text, nullable=True)  # JSON array of tool definitions
-    config_json = Column(Text, nullable=True)  # Extra config
-    
-    session = relationship("AgentSession", back_populates="agents")
-    interactions = relationship("AgentInteraction", back_populates="agent_def", cascade="all, delete-orphan")
-
-
-class SessionTurn(Base):
-    """A turn in the multi-agent conversation"""
-    __tablename__ = "session_turns"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("agent_sessions.id", ondelete="CASCADE"), nullable=False)
-    turn_index = Column(Integer, nullable=False)
-    
-    # User message that triggered this turn
-    user_message = Column(Text, nullable=True)  # Can be null for agent-to-agent turns
-    
-    # Final response to user (if any)
-    final_response = Column(Text, nullable=True)
-    responding_agent_id = Column(String(100), nullable=True)
-    
-    session = relationship("AgentSession", back_populates="turns")
-    interactions = relationship("AgentInteraction", back_populates="turn", cascade="all, delete-orphan", order_by="AgentInteraction.sequence")
-    analysis_results = relationship("TurnAnalysisResult", back_populates="turn", cascade="all, delete-orphan")
-
-
-class AgentInteraction(Base):
-    """What a specific agent did in a turn"""
-    __tablename__ = "agent_interactions"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    turn_id = Column(Integer, ForeignKey("session_turns.id", ondelete="CASCADE"), nullable=False)
-    agent_def_id = Column(Integer, ForeignKey("agent_definitions.id", ondelete="CASCADE"), nullable=False)
-    sequence = Column(Integer, nullable=False)  # Order in the turn
-    
-    agent_id = Column(String(100), nullable=False)  # Denormalized for easy access
-    
-    # The agent's response (if any)
-    agent_response = Column(Text, nullable=True)
-    
-    # Tool execution result (for executor agents)
-    tool_execution_json = Column(Text, nullable=True)  # {tool_name, parameters, output, error}
-    
-    # Performance metrics
-    latency_ms = Column(Integer, nullable=True)  # Time taken for this interaction
-    token_count = Column(Integer, nullable=True)  # Tokens used
-    
-    turn = relationship("SessionTurn", back_populates="interactions")
-    agent_def = relationship("AgentDefinition", back_populates="interactions")
-    steps = relationship("AgentStep", back_populates="interaction", cascade="all, delete-orphan", order_by="AgentStep.step_index")
-
-
-class AgentStep(Base):
-    """A step within an agent interaction (thought, tool call, action)"""
-    __tablename__ = "agent_steps"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    interaction_id = Column(Integer, ForeignKey("agent_interactions.id", ondelete="CASCADE"), nullable=False)
-    step_index = Column(Integer, nullable=False)
-    
-    # Step types
-    step_type = Column(String(50), nullable=False)  # thought, tool_call, action, observation
-    content = Column(Text, nullable=True)  # For thought/action/observation
-    
-    # Tool call details (if step_type == 'tool_call')
-    tool_name = Column(String(100), nullable=True)
-    tool_parameters_json = Column(Text, nullable=True)
-    tool_result = Column(Text, nullable=True)
-    tool_error = Column(Text, nullable=True)
-    
-    # Performance metrics
-    latency_ms = Column(Integer, nullable=True)  # Time taken for tool call
-    
-    interaction = relationship("AgentInteraction", back_populates="steps")
-
-
-class AgentAnalysis(Base):
-    """
-    Analysis run on an agent session.
-    
-    Evaluation happens at 3 levels:
-    
-    1. SESSION LEVEL (stored here):
-       - overall_score: Aggregated score across all metrics
-       - coordination: How well did agents work together?
-       
-    2. TURN LEVEL (TurnAnalysisResult):
-       - conversation: CCM/RDM/Hallucination on user ↔ final_response
-       - Was the final response good for the user?
-       
-    3. INTERACTION LEVEL (InteractionAnalysisResult):
-       - tool_use: Did this agent use tools correctly?
-       - reasoning: Was this agent's reasoning sound?
-       - handoff: Did this agent hand off to next agent properly?
-       - Each agent in each turn is evaluated separately
-    """
-    __tablename__ = "agent_analyses"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("agent_sessions.id", ondelete="CASCADE"), nullable=False)
-    status = Column(String(20), nullable=False, default="pending")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    started_at = Column(DateTime, nullable=True)
-    completed_at = Column(DateTime, nullable=True)
-    
-    # What analyses to run
-    analysis_types_json = Column(Text, nullable=False)  # JSON array
-    
-    # Progress tracking
     current_step = Column(Integer, default=0)
     total_steps = Column(Integer, default=0)
     current_analysis = Column(String(50), nullable=True)
     
-    # ========== SESSION-LEVEL RESULTS ==========
+    # Overall Results
     overall_score = Column(Float, nullable=True)
-    
-    
-    # Multi-agent coordination score
     coordination_score = Column(Float, nullable=True)
-    coordination_result_json = Column(Text, nullable=True)  # Detailed coordination analysis
     
-    # Agent-to-agent handoff quality summary
-    handoff_summary_json = Column(Text, nullable=True)
+    # Per-agent scores
+    agent_scores_json = Column(JSON, nullable=True)
+    per_agent_scores_json = Column(JSON, nullable=True)
     
-    # Per-agent summary scores (aggregated from interactions)
-    agent_scores_json = Column(Text, nullable=True)  # {"agent1": 0.85, "agent2": 0.72}
-    per_agent_scores_json = Column(Text, nullable=True)  # Full per-agent analysis with scores, issues, recommendations
+    # Detailed results by type
+    conversation_result_json = Column(JSON, nullable=True)
+    trajectory_result_json = Column(JSON, nullable=True)
+    tools_result_json = Column(JSON, nullable=True)
+    self_correction_result_json = Column(JSON, nullable=True)
     
-    # ========== AGGREGATED RESULTS (for backwards compat) ==========
-    conversation_result_json = Column(Text, nullable=True)  # Aggregated turn results
-    trajectory_result_json = Column(Text, nullable=True)
-    tools_result_json = Column(Text, nullable=True)  # Aggregated tool use
-    self_correction_result_json = Column(Text, nullable=True)
-    
-    # ========== CONTEXT-AWARE EVALUATION (NEW) ==========
-    # Rolling summaries for each turn (for context-aware evaluation)
-    turn_summaries_json = Column(Text, nullable=True)  # [{turn_index, summary, key_facts, current_status}]
-    
-    # Goal hierarchy for intent drift (tracks main task + sub-goals)
-    goal_hierarchy_json = Column(Text, nullable=True)  # {main_goal, active_goals, completed_goals, goal_history}
+    # Context-aware evaluation
+    turn_summaries_json = Column(JSON, nullable=True)
+    goal_hierarchy_json = Column(JSON, nullable=True)
     
     # Error handling
     error_message = Column(Text, nullable=True)
     retry_count = Column(Integer, default=0)
     last_successful_turn = Column(Integer, nullable=True)
     
-    session = relationship("AgentSession", back_populates="analyses")
-    turn_results = relationship("TurnAnalysisResult", back_populates="analysis", cascade="all, delete-orphan")
-    interaction_results = relationship("InteractionAnalysisResult", back_populates="analysis", cascade="all, delete-orphan")
+    dataset = relationship("Dataset", back_populates="analyses")
+    conversation_results = relationship("ConversationResult", back_populates="analysis", cascade="all, delete-orphan")
+    message_results = relationship("MessageResult", back_populates="analysis", cascade="all, delete-orphan")
+    step_results = relationship("StepResult", back_populates="analysis", cascade="all, delete-orphan")
 
 
-class TurnAnalysisResult(Base):
-    """Analysis result for a single turn (saved in real-time)"""
-    __tablename__ = "turn_analysis_results"
+class ConversationResult(Base):
+    """
+    Analysis result for a conversation.
+    """
+    __tablename__ = "conversation_results"
     
     id = Column(Integer, primary_key=True, index=True)
-    analysis_id = Column(Integer, ForeignKey("agent_analyses.id", ondelete="CASCADE"), nullable=False)
-    turn_id = Column(Integer, ForeignKey("session_turns.id", ondelete="CASCADE"), nullable=False)
-    turn_index = Column(Integer, nullable=False)
+    analysis_id = Column(Integer, ForeignKey("analyses.id", ondelete="CASCADE"), nullable=False)
+    conversation_id = Column(Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False)
+    conversation_index = Column(Integer, nullable=False)
     
-    # Conversation analysis results (user ↔ agents)
+    # Conversation-level detection
     is_bad = Column(Boolean, nullable=True)
-    detection_type = Column(String(20), nullable=True)  # ccm, rdm, llm_judge, hallucination
+    detection_type = Column(String(20), nullable=True)
     confidence = Column(Float, nullable=True)
     reason = Column(Text, nullable=True)
     
-    # Turn-level metrics
-    drift_score = Column(Float, nullable=True)
-    agent_coordination_score = Column(Float, nullable=True)
-    
-    # ========== CONTEXT-AWARE EVALUATION (NEW) ==========
-    # Context summary used when evaluating this turn
-    context_summary = Column(Text, nullable=True)  # Rolling summary of previous turns
-    # Goal this turn was evaluated against (for goal-aware drift)
-    active_goal = Column(Text, nullable=True)  # The relevant goal for this turn
-    # Whether context was used in evaluation
+    # Context-aware fields
+    context_summary = Column(Text, nullable=True)
+    active_goal = Column(Text, nullable=True)
     context_used = Column(Boolean, nullable=True)
+    
+    # Scores
+    drift_score = Column(Float, nullable=True)
+    coordination_score = Column(Float, nullable=True)
     
     created_at = Column(DateTime, default=datetime.utcnow)
     
-    analysis = relationship("AgentAnalysis", back_populates="turn_results")
-    turn = relationship("SessionTurn", back_populates="analysis_results")
+    analysis = relationship("Analysis", back_populates="conversation_results")
+    conversation = relationship("Conversation", back_populates="results")
     
     __table_args__ = (
-        Index('ix_turn_analysis_unique', 'analysis_id', 'turn_id', unique=True),
+        Index('ix_conversation_result_unique', 'analysis_id', 'conversation_id', unique=True),
     )
 
 
-class InteractionAnalysisResult(Base):
+class MessageResult(Base):
     """
-    Per-agent evaluation within a turn.
-    
-    For each agent interaction in a turn, we evaluate:
-    - Did this agent use the right tools?
-    - Was the reasoning sound?
-    - Did it hand off properly to the next agent?
-    - Did it follow its role correctly?
-    
-    Example: Turn 1 has 3 interactions (Planner → Executor → Reviewer)
-    → 3 InteractionAnalysisResult records
+    Analysis result for a message.
     """
-    __tablename__ = "interaction_analysis_results"
+    __tablename__ = "message_results"
     
     id = Column(Integer, primary_key=True, index=True)
-    analysis_id = Column(Integer, ForeignKey("agent_analyses.id", ondelete="CASCADE"), nullable=False)
-    interaction_id = Column(Integer, ForeignKey("agent_interactions.id", ondelete="CASCADE"), nullable=False)
+    analysis_id = Column(Integer, ForeignKey("analyses.id", ondelete="CASCADE"), nullable=False)
+    message_id = Column(Integer, ForeignKey("messages.id", ondelete="CASCADE"), nullable=False)
     
-    # Which agent and which turn
+    # Which agent and sequence
     agent_id = Column(String(100), nullable=False)
-    turn_index = Column(Integer, nullable=False)
-    sequence_in_turn = Column(Integer, nullable=False)  # Order in the turn
+    conversation_index = Column(Integer, nullable=False)
+    sequence_in_conversation = Column(Integer, nullable=False)
     
-    # ========== TOOL USE EVALUATION ==========
-    tool_use_score = Column(Float, nullable=True)  # 0-1 score
-    tool_selection_correct = Column(Boolean, nullable=True)  # Did it pick right tool?
-    tool_params_valid = Column(Boolean, nullable=True)  # Were params correct?
-    tool_use_issues_json = Column(Text, nullable=True)  # List of tool issues
+    # Tool use evaluation
+    tool_use_score = Column(Float, nullable=True)
+    tool_selection_correct = Column(Boolean, nullable=True)
+    tool_params_valid = Column(Boolean, nullable=True)
+    tool_use_issues_json = Column(JSON, nullable=True)
     
-    # ========== REASONING EVALUATION ==========
-    reasoning_score = Column(Float, nullable=True)  # 0-1 score
+    # Reasoning evaluation
+    reasoning_score = Column(Float, nullable=True)
     reasoning_clear = Column(Boolean, nullable=True)
-    reasoning_follows_role = Column(Boolean, nullable=True)  # Does reasoning match agent's role?
-    reasoning_issues_json = Column(Text, nullable=True)
+    reasoning_follows_role = Column(Boolean, nullable=True)
+    reasoning_issues_json = Column(JSON, nullable=True)
     
-    # ========== HANDOFF EVALUATION ==========
-    handoff_score = Column(Float, nullable=True)  # 0-1 score (null if last in turn)
-    handoff_to_agent = Column(String(100), nullable=True)  # Who it handed off to
-    handoff_context_preserved = Column(Boolean, nullable=True)  # Did it pass enough context?
-    handoff_issues_json = Column(Text, nullable=True)
+    # Handoff evaluation
+    handoff_score = Column(Float, nullable=True)
+    handoff_to_agent = Column(String(100), nullable=True)
+    handoff_context_preserved = Column(Boolean, nullable=True)
+    handoff_issues_json = Column(JSON, nullable=True)
     
-    # ========== RESPONSE QUALITY ==========
+    # Response quality
     response_quality_score = Column(Float, nullable=True)
-    response_appropriate = Column(Boolean, nullable=True)  # Was response appropriate for role?
+    response_appropriate = Column(Boolean, nullable=True)
     
-    # ========== OVERALL ==========
-    overall_score = Column(Float, nullable=True)  # Weighted average
-    issues_json = Column(Text, nullable=True)  # All issues combined
+    # Overall
+    overall_score = Column(Float, nullable=True)
+    issues_json = Column(JSON, nullable=True)
     
-    # ========== FULL METRIC BREAKDOWNS (NEW) ==========
-    # Detailed tool use breakdown
-    tool_use_details_json = Column(Text, nullable=True)  # {efficiency, calls, errors, results}
-    # Detailed self-correction breakdown
-    self_correction_details_json = Column(Text, nullable=True)  # {detected_error, attempt, awareness_score}
-    # Detailed response quality breakdown
-    response_quality_details_json = Column(Text, nullable=True)  # {good_count, bad_count, results}
+    # Detailed breakdowns
+    tool_use_details_json = Column(JSON, nullable=True)
+    self_correction_details_json = Column(JSON, nullable=True)
+    response_quality_details_json = Column(JSON, nullable=True)
+    intent_drift_details_json = Column(JSON, nullable=True)  # Per-agent intent drift
     
     created_at = Column(DateTime, default=datetime.utcnow)
     
-    analysis = relationship("AgentAnalysis", back_populates="interaction_results")
-    interaction = relationship("AgentInteraction")
+    analysis = relationship("Analysis", back_populates="message_results")
+    message = relationship("Message", back_populates="results")
     
     __table_args__ = (
-        Index('ix_interaction_analysis_unique', 'analysis_id', 'interaction_id', unique=True),
+        Index('ix_message_result_unique', 'analysis_id', 'message_id', unique=True),
+    )
+
+
+class StepResult(Base):
+    """
+    Analysis result for a step.
+    """
+    __tablename__ = "step_results"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    analysis_id = Column(Integer, ForeignKey("analyses.id", ondelete="CASCADE"), nullable=False)
+    step_id = Column(Integer, ForeignKey("steps.id", ondelete="CASCADE"), nullable=False)
+    
+    # Tool evaluation
+    tool_selection_correct = Column(Boolean, nullable=True)
+    tool_params_valid = Column(Boolean, nullable=True)
+    tool_use_score = Column(Float, nullable=True)
+    
+    # Reasoning
+    reasoning_score = Column(Float, nullable=True)
+    
+    # Self-correction
+    detected_error = Column(Boolean, nullable=True)
+    correction_attempted = Column(Boolean, nullable=True)
+    correction_success = Column(Boolean, nullable=True)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    analysis = relationship("Analysis", back_populates="step_results")
+    step = relationship("Step", back_populates="results")
+    
+    __table_args__ = (
+        Index('ix_step_result_unique', 'analysis_id', 'step_id', unique=True),
     )
 
 
@@ -422,6 +345,17 @@ def init_db():
     Base.metadata.create_all(bind=engine)
 
 
+def drop_all_tables():
+    """Drop all tables (for fresh start)"""
+    Base.metadata.drop_all(bind=engine)
+
+
+def reset_db():
+    """Drop and recreate all tables"""
+    drop_all_tables()
+    init_db()
+
+
 def get_db():
     """Dependency for getting database session"""
     db = SessionLocal()
@@ -431,7 +365,22 @@ def get_db():
         db.close()
 
 
-# Aliases for backwards compatibility / shorter names
-AgentTraceDB = AgentSession
-AgentTurnDB = SessionTurn
-AnalysisJobDB = AgentAnalysis
+# ============================================
+# Backwards compatibility aliases
+# ============================================
+# These allow existing code to work while we migrate
+
+AgentSession = Dataset
+AgentDefinition = Agent
+SessionTurn = Conversation
+AgentInteraction = Message
+AgentStep = Step  # Direct alias
+AgentStepDB = Step  # Also aliased for imports that use this name
+AgentAnalysis = Analysis
+TurnAnalysisResult = ConversationResult
+InteractionAnalysisResult = MessageResult
+
+# Additional aliases from old code
+AgentTraceDB = Dataset
+AgentTurnDB = Conversation
+AnalysisJobDB = Analysis

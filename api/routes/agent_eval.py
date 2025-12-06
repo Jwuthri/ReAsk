@@ -434,21 +434,27 @@ def compute_per_agent_scores(
             detected_error = any(kw in ' '.join(thoughts).lower() for kw in error_keywords)
             correction_attempt = any(kw in ' '.join(thoughts).lower() for kw in recovery_keywords)
             
-            # Calculate awareness score based on thought quality
-            awareness_score = 0.5  # Default
-            if detected_error and correction_attempt:
+            # Calculate awareness score based on error detection and correction
+            # KEY FIX: If no error detected, score should be 1.0 (perfect - no correction needed)
+            if not detected_error:
+                # No error detected = no correction needed = perfect score
+                awareness_score = 1.0
+            elif detected_error and correction_attempt:
+                # Error detected AND corrected = great self-correction
                 awareness_score = 0.9
             elif detected_error:
-                awareness_score = 0.7
-            elif metrics['reasoning_steps'] > 2:
-                awareness_score = 0.8  # Good reasoning = good self-awareness
+                # Error detected but not corrected = poor self-correction
+                awareness_score = 0.5
+            else:
+                # Fallback (shouldn't reach here)
+                awareness_score = 1.0
             
             self_correction_data = {
                 'detected_error': detected_error,
                 'correction_attempt': correction_attempt,
                 'correction_success': correction_attempt,  # Assume success if attempted
                 'self_awareness_score': round(awareness_score, 2),
-                'correction_efficiency': round(awareness_score * 0.9, 2),  # Simplified
+                'correction_efficiency': round(awareness_score, 2),
                 'reasoning_steps': metrics['reasoning_steps'],
             }
         
@@ -1438,14 +1444,14 @@ async def save_agent_trace(request: SaveAnalysisRequest, db: Session = Depends(g
         task_desc = session_input.turns[0].user_message or "Agent Trace"
     console.print(f"[bold blue]💾 Saving trace:[/] '{task_desc[:50]}...' ({'multi-agent' if is_multi_agent else 'single-agent'})")
     
-    # Create the session record
-    db_session = AgentSession(
+    # Create the dataset record (was session)
+    db_dataset = AgentSession(  # Uses alias -> Dataset
         name=request.name or task_desc[:100],
-        initial_task=session_input.initial_task,
+        task=session_input.initial_task,  # new column name
         success=session_input.success,
         total_cost=session_input.total_cost,
     )
-    db.add(db_session)
+    db.add(db_dataset)
     db.flush()
     
     # Create agent definitions - store all agents for multi-agent, or default for single
@@ -1453,22 +1459,22 @@ async def save_agent_trace(request: SaveAnalysisRequest, db: Session = Depends(g
     agents_to_save = session_input.agents or [AgentDef(id="agent", name="Agent", role="primary")]
     
     for agent in agents_to_save:
-        db_agent = AgentDefinition(
-            session_id=db_session.id,
+        db_agent = AgentDefinition(  # Uses alias -> Agent
+            dataset_id=db_dataset.id,  # new column name
             agent_id=agent.id,
             name=agent.name or agent.id,
             role=agent.role,
             description=agent.description,
-            capabilities_json=json.dumps(agent.capabilities) if agent.capabilities else None,
-            tools_available_json=json.dumps([t.dict() for t in agent.tools_available]) if agent.tools_available else None,
+            capabilities_json=agent.capabilities if agent.capabilities else None,
+            tools_available_json=[t.dict() for t in agent.tools_available] if agent.tools_available else None,
         )
         db.add(db_agent)
         db.flush()
         agent_def_map[agent.id] = db_agent
     
-    # Add turns and their interactions/steps
+    # Add conversations (was turns) and their messages/steps
     total_steps = 0
-    for turn_idx, turn in enumerate(session_input.turns):
+    for conv_idx, turn in enumerate(session_input.turns):
         # Get final response from the last interaction that has one
         final_response = None
         responding_agent_id = None
@@ -1478,32 +1484,31 @@ async def save_agent_trace(request: SaveAnalysisRequest, db: Session = Depends(g
                 responding_agent_id = interaction.agent_id
                 break
         
-        db_turn = SessionTurn(
-            session_id=db_session.id,
-            turn_index=turn.turn_index if turn.turn_index is not None else turn_idx,
-            user_message=turn.user_message,
+        db_conversation = SessionTurn(  # Uses alias -> Conversation
+            dataset_id=db_dataset.id,
+            conversation_index=turn.turn_index if turn.turn_index is not None else conv_idx,
+            user_input=turn.user_message,  # new column name
             final_response=final_response,
             responding_agent_id=responding_agent_id,
         )
-        db.add(db_turn)
+        db.add(db_conversation)
         db.flush()
         
-        # Create interactions for each agent in this turn
+        # Create messages (was interactions) for each agent in this turn
         for seq, interaction in enumerate(turn.agent_interactions or []):
             agent_def = agent_def_map.get(interaction.agent_id)
             
-            db_interaction = AgentInteraction(
-                turn_id=db_turn.id,
-                agent_def_id=agent_def.id if agent_def else None,
+            db_message = AgentInteraction(  # Uses alias -> Message
+                conversation_id=db_conversation.id,  # new column name
                 sequence=seq,
                 agent_id=interaction.agent_id,
-                agent_response=interaction.agent_response,
+                content=interaction.agent_response,  # new column name
                 latency_ms=interaction.latency_ms,
             )
-            db.add(db_interaction)
+            db.add(db_message)
             db.flush()
             
-            # Add steps for this interaction
+            # Add steps for this message
             for step_idx, step in enumerate(interaction.agent_steps or []):
                 # Determine step type
                 if step.tool_call:
@@ -1516,13 +1521,13 @@ async def save_agent_trace(request: SaveAnalysisRequest, db: Session = Depends(g
                     step_type = "action"
                 
                 tool_call = step.tool_call
-                db_step = AgentStepDB(
-                    interaction_id=db_interaction.id,
+                db_step = AgentStepDB(  # Uses alias -> Step
+                    message_id=db_message.id,  # new column name
                     step_index=step_idx,
                     step_type=step_type,
                     content=step.thought or step.action or step.observation,
                     tool_name=tool_call.tool_name if tool_call else None,
-                    tool_parameters_json=json.dumps(tool_call.parameters) if tool_call and tool_call.parameters else None,
+                    tool_parameters_json=tool_call.parameters if tool_call and tool_call.parameters else None,
                     tool_result=tool_call.result if tool_call else None,
                     tool_error=tool_call.error if tool_call else None,
                 )
@@ -1530,33 +1535,33 @@ async def save_agent_trace(request: SaveAnalysisRequest, db: Session = Depends(g
                 total_steps += 1
     
     # Create analysis record with results
-    db_analysis = AgentAnalysis(
-        session_id=db_session.id,
+    db_analysis = AgentAnalysis(  # Uses alias -> Analysis
+        dataset_id=db_dataset.id,  # new column name
         status="completed",
-        analysis_types_json=json.dumps(results.get('analysis_types', [])),
+        analysis_types_json=results.get('analysis_types', []),
         overall_score=results.get('overall_score'),
-        conversation_result_json=json.dumps(results.get('conversation')) if results.get('conversation') else None,
-        trajectory_result_json=json.dumps(results.get('trajectory')) if results.get('trajectory') else None,
-        tools_result_json=json.dumps(results.get('tools')) if results.get('tools') else None,
-        self_correction_result_json=json.dumps(results.get('self_correction')) if results.get('self_correction') else None,
-        per_agent_scores_json=json.dumps(results.get('per_agent_scores')) if results.get('per_agent_scores') else None,
+        conversation_result_json=results.get('conversation'),
+        trajectory_result_json=results.get('trajectory'),
+        tools_result_json=results.get('tools'),
+        self_correction_result_json=results.get('self_correction'),
+        per_agent_scores_json=results.get('per_agent_scores'),
         coordination_score=results.get('coordination_score'),
     )
     db.add(db_analysis)
     
     db.commit()
-    db.refresh(db_session)
+    db.refresh(db_dataset)
     db.refresh(db_analysis)
     
-    console.print(f"  [green]✓[/] Saved as ID=[bold]{db_session.id}[/] with {len(session_input.turns)} turns, {total_steps} steps, {len(agents_to_save)} agents")
+    console.print(f"  [green]✓[/] Saved as ID=[bold]{db_dataset.id}[/] with {len(session_input.turns)} turns, {total_steps} steps, {len(agents_to_save)} agents")
     
     return SavedTraceResponse(
-        id=db_session.id,
-        name=db_session.name,
+        id=db_dataset.id,
+        name=db_dataset.name,
         task=task_desc,
-        success=db_session.success,
-        total_cost=db_session.total_cost,
-        created_at=db_session.created_at.isoformat(),
+        success=db_dataset.success,
+        total_cost=db_dataset.total_cost,
+        created_at=db_dataset.created_at.isoformat(),
         overall_score=db_analysis.overall_score,
         step_count=total_steps,
     )
@@ -1573,20 +1578,20 @@ async def list_agent_traces(db: Session = Depends(get_db), limit: int = 50, offs
     for t in traces:
         # Get latest completed analysis for this trace
         latest_analysis = db.query(AnalysisJobDB).filter(
-            AnalysisJobDB.session_id == t.id,
+            AnalysisJobDB.dataset_id == t.id,  # new column name
             AnalysisJobDB.status == 'completed'
         ).order_by(AnalysisJobDB.completed_at.desc()).first()
         
         result.append({
             'id': t.id,
             'name': t.name,
-            'task': t.initial_task or (t.turns[0].user_message if t.turns else "Agent Trace"),
+            'task': t.task or (t.conversations[0].user_input if t.conversations else "Agent Trace"),  # new column names
             'success': t.success,
             'total_cost': t.total_cost,
             'created_at': t.created_at.isoformat(),
             'overall_score': latest_analysis.overall_score if latest_analysis else None,
-            'step_count': len(t.turns),
-            'analysis_types': json.loads(latest_analysis.analysis_types_json) if latest_analysis and latest_analysis.analysis_types_json else [],
+            'step_count': len(t.conversations),  # new column name
+            'analysis_types': latest_analysis.analysis_types_json if latest_analysis and latest_analysis.analysis_types_json else [],  # JSON column
             'has_analysis': latest_analysis is not None,
         })
     
@@ -1604,7 +1609,7 @@ async def get_agent_trace(trace_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Trace not found")
     
     # Get agent definitions to determine if multi-agent
-    agent_defs = db.query(AgentDefinition).filter(AgentDefinition.session_id == trace_id).all()
+    agent_defs = db.query(AgentDefinition).filter(AgentDefinition.dataset_id == trace_id).all()  # new column name
     is_multi_agent = len(agent_defs) > 1 or (len(agent_defs) == 1 and agent_defs[0].agent_id != "agent")
     
     # Build agents array
@@ -1618,22 +1623,22 @@ async def get_agent_trace(trace_id: int, db: Session = Depends(get_db)):
         if agent_def.description:
             agent['description'] = agent_def.description
         if agent_def.capabilities_json:
-            agent['capabilities'] = json.loads(agent_def.capabilities_json)
+            agent['capabilities'] = agent_def.capabilities_json  # JSON column
         if agent_def.tools_available_json:
-            agent['tools_available'] = json.loads(agent_def.tools_available_json)
+            agent['tools_available'] = agent_def.tools_available_json  # JSON column
         agents.append(agent)
     
     # Rebuild turns - multi-agent format with agent_interactions
     turns = []
-    for db_turn in trace.turns:
-        # Sort interactions by sequence
-        sorted_interactions = sorted(db_turn.interactions, key=lambda x: x.sequence or 0)
+    for db_conv in trace.conversations:  # new column name
+        # Sort messages by sequence
+        sorted_messages = sorted(db_conv.messages, key=lambda x: x.sequence or 0)  # new column name
         
         agent_interactions = []
-        for interaction in sorted_interactions:
-            # Build steps for this interaction
+        for message in sorted_messages:  # renamed from interaction
+            # Build steps for this message
             steps = []
-            for step in sorted(interaction.steps, key=lambda x: x.step_index):
+            for step in sorted(message.steps, key=lambda x: x.step_index):
                 step_data = {}
                 if step.step_type == 'thought' and step.content:
                     step_data['thought'] = step.content
@@ -1645,7 +1650,7 @@ async def get_agent_trace(trace_id: int, db: Session = Depends(get_db)):
                 if step.step_type == 'tool_call' and step.tool_name:
                     step_data['tool_call'] = {
                         'tool_name': step.tool_name,
-                        'parameters': json.loads(step.tool_parameters_json) if step.tool_parameters_json else {},
+                        'parameters': step.tool_parameters_json or {},  # JSON column
                         'result': step.tool_result,
                         'error': step.tool_error,
                     }
@@ -1654,46 +1659,46 @@ async def get_agent_trace(trace_id: int, db: Session = Depends(get_db)):
                     steps.append(step_data)
             
             interaction_data = {
-                'agent_id': interaction.agent_id,
+                'agent_id': message.agent_id,
                 'agent_steps': steps,
             }
-            if interaction.agent_response:
-                interaction_data['agent_response'] = interaction.agent_response
-            if interaction.latency_ms:
-                interaction_data['latency_ms'] = interaction.latency_ms
+            if message.content:  # new column name
+                interaction_data['agent_response'] = message.content
+            if message.latency_ms:
+                interaction_data['latency_ms'] = message.latency_ms
             
             agent_interactions.append(interaction_data)
         
         turn_data = {
-            'turn_index': db_turn.turn_index,
-            'user_message': db_turn.user_message,
+            'turn_index': db_conv.conversation_index,  # new column name
+            'user_message': db_conv.user_input,  # new column name
             'agent_interactions': agent_interactions,
         }
         turns.append(turn_data)
     
     # Get latest completed analysis
     latest_analysis = db.query(AnalysisJobDB).filter(
-        AnalysisJobDB.session_id == trace_id,
+        AnalysisJobDB.dataset_id == trace_id,  # new column name
         AnalysisJobDB.status == 'completed'
     ).order_by(AnalysisJobDB.completed_at.desc()).first()
     
     # Rebuild results from analysis
     results = {
         'overall_score': latest_analysis.overall_score if latest_analysis else None,
-        'analysis_types': json.loads(latest_analysis.analysis_types_json) if latest_analysis and latest_analysis.analysis_types_json else [],
+        'analysis_types': latest_analysis.analysis_types_json if latest_analysis and latest_analysis.analysis_types_json else [],  # JSON column
     }
     
     if latest_analysis:
         if latest_analysis.conversation_result_json:
-            results['conversation'] = json.loads(latest_analysis.conversation_result_json)
+            results['conversation'] = latest_analysis.conversation_result_json  # JSON column
         if latest_analysis.trajectory_result_json:
-            results['trajectory'] = json.loads(latest_analysis.trajectory_result_json)
+            results['trajectory'] = latest_analysis.trajectory_result_json
         if latest_analysis.tools_result_json:
-            results['tools'] = json.loads(latest_analysis.tools_result_json)
+            results['tools'] = latest_analysis.tools_result_json
         if latest_analysis.self_correction_result_json:
-            results['self_correction'] = json.loads(latest_analysis.self_correction_result_json)
+            results['self_correction'] = latest_analysis.self_correction_result_json
         if hasattr(latest_analysis, 'per_agent_scores_json') and latest_analysis.per_agent_scores_json:
-            results['per_agent_scores'] = json.loads(latest_analysis.per_agent_scores_json)
+            results['per_agent_scores'] = latest_analysis.per_agent_scores_json
         if hasattr(latest_analysis, 'coordination_score') and latest_analysis.coordination_score:
             results['coordination_score'] = latest_analysis.coordination_score
     
@@ -1705,7 +1710,7 @@ async def get_agent_trace(trace_id: int, db: Session = Depends(get_db)):
         'created_at': trace.created_at.isoformat(),
         'trace': {
             'agents': agents,
-            'initial_task': trace.initial_task,
+            'initial_task': trace.task,  # new column name
             'turns': turns,
             'success': trace.success,
             'total_cost': trace.total_cost,
@@ -1743,31 +1748,31 @@ def save_session_to_db(db: Session, session_input: AgentSessionInput) -> tuple:
     """Save multi-agent session to database, return the DB object with ID"""
     from datetime import datetime as dt
     
-    task_desc = session_input.task[:100]
+    task_desc = session_input.task[:100] if session_input.task else "Untitled"
     
-    # Create session
-    db_session = AgentSession(
+    # Create dataset (was AgentSession)
+    db_dataset = AgentSession(  # Uses alias -> Dataset
         name=task_desc,
-        initial_task=session_input.initial_task,
+        task=session_input.initial_task,  # new column name
         success=session_input.success,
         total_cost=session_input.total_cost,
-        metadata_json=json.dumps(session_input.session_metadata.dict()) if session_input.session_metadata else None,
+        metadata_json=session_input.session_metadata.dict() if session_input.session_metadata else None,
     )
-    db.add(db_session)
+    db.add(db_dataset)
     db.flush()
     
     # Save agent definitions
     agent_db_map = {}
     for agent_def in (session_input.agents or []):
-        db_agent = AgentDefinition(
-            session_id=db_session.id,
+        db_agent = AgentDefinition(  # Uses alias -> Agent
+            dataset_id=db_dataset.id,  # new column name
             agent_id=agent_def.id,
             name=agent_def.name,
             role=agent_def.role,
             description=agent_def.description,
-            capabilities_json=json.dumps(agent_def.capabilities) if agent_def.capabilities else None,
-            tools_available_json=json.dumps([t.dict() for t in agent_def.tools_available]) if agent_def.tools_available else None,
-            config_json=json.dumps(agent_def.config) if agent_def.config else None,
+            capabilities_json=agent_def.capabilities if agent_def.capabilities else None,
+            tools_available_json=[t.dict() for t in agent_def.tools_available] if agent_def.tools_available else None,
+            config_json=agent_def.config if agent_def.config else None,
         )
         db.add(db_agent)
         db.flush()
@@ -1776,7 +1781,7 @@ def save_session_to_db(db: Session, session_input: AgentSessionInput) -> tuple:
     # If no agents defined, create a default one
     if not agent_db_map:
         db_agent = AgentDefinition(
-            session_id=db_session.id,
+            dataset_id=db_dataset.id,
             agent_id="agent",
             name="Agent",
             role="primary",
@@ -1785,9 +1790,9 @@ def save_session_to_db(db: Session, session_input: AgentSessionInput) -> tuple:
         db.flush()
         agent_db_map["agent"] = db_agent
     
-    # Save turns with interactions
-    turn_db_map = {}
-    for turn_idx, turn in enumerate(session_input.turns):
+    # Save conversations (was SessionTurn)
+    conversation_db_map = {}
+    for conv_idx, turn in enumerate(session_input.turns):
         # Find final response from interactions
         final_response = None
         responding_agent = None
@@ -1796,23 +1801,23 @@ def save_session_to_db(db: Session, session_input: AgentSessionInput) -> tuple:
                 final_response = interaction.agent_response
                 responding_agent = interaction.agent_id
         
-        db_turn = SessionTurn(
-            session_id=db_session.id,
-            turn_index=turn.turn_index if turn.turn_index is not None else turn_idx,
-            user_message=turn.user_message,
+        db_conversation = SessionTurn(  # Uses alias -> Conversation
+            dataset_id=db_dataset.id,
+            conversation_index=turn.turn_index if turn.turn_index is not None else conv_idx,
+            user_input=turn.user_message,  # new column name
             final_response=final_response,
             responding_agent_id=responding_agent,
         )
-        db.add(db_turn)
+        db.add(db_conversation)
         db.flush()
-        turn_db_map[turn_idx] = db_turn
+        conversation_db_map[conv_idx] = db_conversation
         
-        # Save agent interactions
+        # Save messages (was AgentInteraction)
         for seq, interaction in enumerate(turn.agent_interactions):
             # Get or create agent definition
             if interaction.agent_id not in agent_db_map:
                 db_agent = AgentDefinition(
-                    session_id=db_session.id,
+                    dataset_id=db_dataset.id,
                     agent_id=interaction.agent_id,
                     name=interaction.agent_id,
                 )
@@ -1820,15 +1825,14 @@ def save_session_to_db(db: Session, session_input: AgentSessionInput) -> tuple:
                 db.flush()
                 agent_db_map[interaction.agent_id] = db_agent
             
-            db_interaction = AgentInteraction(
-                turn_id=db_turn.id,
-                agent_def_id=agent_db_map[interaction.agent_id].id,
+            db_message = AgentInteraction(  # Uses alias -> Message
+                conversation_id=db_conversation.id,  # new column name
                 sequence=seq,
                 agent_id=interaction.agent_id,
-                agent_response=interaction.agent_response,
-                tool_execution_json=json.dumps(interaction.tool_execution_result.dict()) if interaction.tool_execution_result else None,
+                content=interaction.agent_response,  # new column name
+                tool_execution_json=interaction.tool_execution_result.dict() if interaction.tool_execution_result else None,
             )
-            db.add(db_interaction)
+            db.add(db_message)
             db.flush()
             
             # Save steps
@@ -1849,21 +1853,21 @@ def save_session_to_db(db: Session, session_input: AgentSessionInput) -> tuple:
                 else:
                     continue
                 
-                db_step = AgentStepDB(
-                    interaction_id=db_interaction.id,
+                db_step = AgentStepDB(  # Uses alias -> Step
+                    message_id=db_message.id,  # new column name
                     step_index=step_idx,
                     step_type=step_type,
                     content=content,
                     tool_name=step.tool_call.tool_name if step.tool_call else None,
-                    tool_parameters_json=json.dumps(step.tool_call.parameters) if step.tool_call else None,
+                    tool_parameters_json=step.tool_call.parameters if step.tool_call else None,
                     tool_result=step.tool_call.result if step.tool_call else None,
                     tool_error=step.tool_call.error if step.tool_call else None,
                 )
                 db.add(db_step)
     
     db.commit()
-    db.refresh(db_session)
-    return db_session, turn_db_map
+    db.refresh(db_dataset)
+    return db_dataset, conversation_db_map
 
 
 def save_trace_to_db(db: Session, trace_input: AgentTraceInput) -> tuple:
@@ -1882,7 +1886,7 @@ def run_background_analysis(analysis_id: int, resume_from: int = 0):
         if not analysis:
             return
         
-        trace_id = analysis.session_id
+        trace_id = analysis.dataset_id  # new column name
         db_trace = db.query(AgentTraceDB).filter(AgentTraceDB.id == trace_id).first()
         if not db_trace:
             analysis.status = "failed"
@@ -2310,9 +2314,9 @@ async def start_analysis_job(request: StartJobRequest, db: Session = Depends(get
     
     # STEP 2: Create analysis linked to trace
     analysis = AnalysisJobDB(
-        session_id=db_trace.id,
+        dataset_id=db_trace.id,  # new column name
         status="pending",
-        analysis_types_json=json.dumps(request.analysis_types),
+        analysis_types_json=request.analysis_types,  # JSON column
         total_steps=len(request.analysis_types),
     )
     db.add(analysis)
@@ -2396,7 +2400,7 @@ async def get_job_status(job_id: int, db: Session = Depends(get_db)):
     
     return JobStatusResponse(
         id=analysis.id,
-        trace_id=analysis.session_id,
+        trace_id=analysis.dataset_id,  # new column name
         status=analysis.status,
         current_step=analysis.current_step or 0,
         total_steps=analysis.total_steps or 0,
@@ -2421,7 +2425,7 @@ async def list_jobs(db: Session = Depends(get_db), limit: int = 20, status: Opti
     return [
         {
             'id': j.id,
-            'trace_id': j.session_id,
+            'trace_id': j.dataset_id,  # new column name
             'status': j.status,
             'current_step': j.current_step,
             'total_steps': j.total_steps,

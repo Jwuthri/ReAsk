@@ -2,94 +2,15 @@
 
 from datetime import datetime
 from typing import Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
-# Message schemas
-class MessageBase(BaseModel):
-    role: str
-    content: str
-    knowledge: Optional[str] = None
+# ============================================
+# Analysis Stats Schema
+# ============================================
 
-
-class MessageCreate(MessageBase):
-    index: int
-
-
-class MessageResponse(MessageBase):
-    id: int
-    index: int
-    knowledge: Optional[str] = None
-    
-    class Config:
-        from_attributes = True
-
-
-# Eval result schemas
-class EvalResultResponse(BaseModel):
-    id: int
-    message_id: int
-    is_bad: bool
-    detection_type: str
-    confidence: float
-    reason: Optional[str] = None
-    
-    class Config:
-        from_attributes = True
-
-
-class MessageWithEval(MessageResponse):
-    eval_result: Optional[EvalResultResponse] = None
-
-
-# Conversation schemas
-class ConversationBase(BaseModel):
-    conversation_id: str
-
-
-class ConversationResponse(ConversationBase):
-    id: int
-    messages: List[MessageResponse] = []
-    
-    class Config:
-        from_attributes = True
-
-
-class ConversationWithEvals(ConversationBase):
-    id: int
-    messages: List[MessageWithEval] = []
-    
-    class Config:
-        from_attributes = True
-
-
-# Dataset schemas
-class DatasetBase(BaseModel):
-    name: str
-
-
-class DatasetCreate(DatasetBase):
-    file_type: str
-
-
-class DatasetResponse(DatasetBase):
-    id: int
-    file_type: str
-    uploaded_at: datetime
-    evaluated: bool
-    conversation_count: int = 0
-    message_count: int = 0
-    
-    class Config:
-        from_attributes = True
-
-
-class DatasetDetail(DatasetResponse):
-    conversations: List[ConversationWithEvals] = []
-
-
-# Stats schemas
 class EvalStats(BaseModel):
+    """Statistics from an analysis run"""
     total_responses: int
     good_responses: int
     bad_responses: int
@@ -100,15 +21,50 @@ class EvalStats(BaseModel):
     avg_confidence: float
 
 
-class DatasetWithStats(DatasetDetail):
-    stats: Optional[EvalStats] = None
+# ============================================
+# Dataset Schemas (for API responses)
+# ============================================
 
-
-# Upload response
-class UploadResponse(BaseModel):
+class DatasetSummary(BaseModel):
+    """Summary of a dataset"""
     id: int
-    name: str
-    file_type: str
-    conversations_imported: int
-    messages_imported: int
+    name: Optional[str]
+    task: Optional[str]
+    created_at: datetime
+    conversation_count: int = 0
+    success: Optional[bool] = None
+    total_cost: Optional[float] = None
+    
+    class Config:
+        from_attributes = True
 
+
+class DatasetDetail(DatasetSummary):
+    """Detailed dataset info with conversations"""
+    agents: List[dict] = []
+    conversations: List[dict] = []
+    latest_analysis: Optional[dict] = None
+
+
+# ============================================
+# Analysis Schemas
+# ============================================
+
+class AnalysisSummary(BaseModel):
+    """Summary of an analysis"""
+    id: int
+    dataset_id: int
+    status: str
+    created_at: datetime
+    overall_score: Optional[float] = None
+    
+    class Config:
+        from_attributes = True
+
+
+class AnalysisDetail(AnalysisSummary):
+    """Detailed analysis with all results"""
+    analysis_types: List[str] = []
+    conversation_results: List[dict] = []
+    message_results: List[dict] = []
+    step_results: List[dict] = []

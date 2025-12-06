@@ -83,7 +83,7 @@ function GlobalView({ trace, results }: { trace: AgentTraceInput; results?: Agen
             className={styles.scoreBarFill}
             style={{ 
               width: `${results.overall_score * 100}%`,
-              background: `linear-gradient(90deg, ${getScoreColor(results.overall_score)}, ${getScoreColor(results.overall_score)}dd)`
+              background: getScoreColor(results.overall_score)
             }}
           />
           <div className={styles.scoreBarMarkers}>

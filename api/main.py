@@ -10,7 +10,8 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 from .database import init_db
-from .routes import datasets, evaluate, agent_eval
+from .routes import agent_eval
+
 
 # Configure Rich logging
 console = Console()
@@ -75,8 +76,6 @@ async def log_requests(request: Request, call_next):
 
 
 # Include routers
-app.include_router(datasets.router, prefix="/api/datasets", tags=["datasets"])
-app.include_router(evaluate.router, prefix="/api", tags=["evaluate"])
 app.include_router(agent_eval.router, prefix="/api", tags=["agent"])
 
 
