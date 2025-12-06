@@ -4,6 +4,7 @@ import { useState } from 'react';
 import styles from './AgentTraceViewer.module.css';
 import AgentTree, { TreeSelection } from './AgentTree';
 import DetailPanel from './DetailPanel';
+import StreamingAnalysisTable from './StreamingAnalysisTable';
 import {
   AgentTraceInput,
   AgentAnalysisResults,
@@ -66,8 +67,8 @@ export default function AgentTraceViewer({ trace, results, loading, liveProgress
           <div className={styles.heroMetrics}>
             {results.conversation && (
               <div className={styles.heroMetric}>
-                <span className={styles.heroMetricValue} style={{ 
-                  color: results.conversation.bad_responses > 0 ? 'var(--accent-red)' : 'var(--accent-green)' 
+                <span className={styles.heroMetricValue} style={{
+                  color: results.conversation.bad_responses > 0 ? 'var(--accent-red)' : 'var(--accent-green)'
                 }}>
                   {results.conversation.good_responses}/{results.conversation.total_responses}
                 </span>
@@ -111,7 +112,7 @@ export default function AgentTraceViewer({ trace, results, loading, liveProgress
               Analyzing Turn {liveProgress.turnCurrent}/{liveProgress.turnTotal}
             </span>
             <div className={styles.liveBar}>
-              <div 
+              <div
                 className={styles.liveBarFill}
                 style={{ width: `${((liveProgress.turnCurrent || 0) / (liveProgress.turnTotal || 1)) * 100}%` }}
               />
@@ -119,8 +120,8 @@ export default function AgentTraceViewer({ trace, results, loading, liveProgress
           </div>
           <div className={styles.liveTurns}>
             {liveProgress.turnResults.map((result, idx) => (
-              <div 
-                key={idx} 
+              <div
+                key={idx}
                 className={`${styles.liveTurn} ${result.is_bad ? styles.liveBad : styles.liveGood}`}
               >
                 <span className={styles.liveTurnIcon}>
@@ -146,9 +147,9 @@ export default function AgentTraceViewer({ trace, results, loading, liveProgress
           <div className={styles.treePanelHeader}>
             <span className={styles.treePanelTitle}>🗂️ Navigation</span>
           </div>
-          <AgentTree 
-            trace={trace} 
-            results={results} 
+          <AgentTree
+            trace={trace}
+            results={results}
             selection={selection}
             onSelect={setSelection}
           />
@@ -156,7 +157,7 @@ export default function AgentTraceViewer({ trace, results, loading, liveProgress
 
         {/* Right Panel - Detail View */}
         <div className={styles.detailPanel}>
-          <DetailPanel 
+          <DetailPanel
             trace={trace}
             results={results}
             selection={selection}
@@ -164,59 +165,16 @@ export default function AgentTraceViewer({ trace, results, loading, liveProgress
         </div>
       </div>
 
-      {/* Conversation Timeline (Bottom) */}
-      <div className={styles.timeline}>
-        <h4 className={styles.timelineTitle}>📜 Conversation Timeline</h4>
-        <div className={styles.timelineList}>
-          {trace.turns?.map((turn, index) => {
-            const turnResult = results?.conversation?.results?.find(r => r.step_index === index);
-            const isSelected = selection.type === 'turn' && selection.turnIndex === index;
-            
-            // Get agents involved in this turn
-            const agentsInvolved = turn.agent_interactions 
-              ? turn.agent_interactions.map(i => {
-                  const agent = trace.agents?.find(a => a.id === i.agent_id);
-                  return agent?.name || i.agent_id;
-                })
-              : ['Agent'];
-
-            return (
-              <div 
-                key={index}
-                className={`${styles.timelineItem} ${isSelected ? styles.selected : ''} ${turnResult?.is_bad ? styles.bad : ''}`}
-                onClick={() => setSelection({ type: 'turn', turnIndex: index })}
-              >
-                <div className={styles.timelineIndex}>
-                  <span className={styles.timelineNumber}>{index + 1}</span>
-                </div>
-                <div className={styles.timelineContent}>
-                  <div className={styles.timelineMessage}>
-                    {turn.user_message?.slice(0, 60)}{(turn.user_message?.length || 0) > 60 ? '...' : ''}
-                  </div>
-                  <div className={styles.timelineAgents}>
-                    {agentsInvolved.map((name, i) => (
-                      <span key={i} className={styles.timelineAgent}>{name}</span>
-                    ))}
-                  </div>
-                </div>
-                <div className={styles.timelineBadges}>
-                  {turnResult && (
-                    <span 
-                      className={styles.timelineScore}
-                      style={{ 
-                        background: turnResult.is_bad ? 'var(--accent-red)' : 
-                                   turnResult.confidence >= 0.8 ? 'var(--accent-green)' : 'var(--accent-orange)'
-                      }}
-                    >
-                      {turnResult.is_bad ? '❌' : '✓'} {turnResult.detection_type.toUpperCase()}
-                    </span>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      {/* Conversation Analysis Table (Bottom) */}
+      {trace.turns && trace.turns.length > 0 && (
+        <StreamingAnalysisTable
+          turns={trace.turns}
+          turnResults={results?.conversation?.results || liveProgress?.turnResults || []}
+          currentTurn={loading && liveProgress?.turnCurrent ? liveProgress.turnCurrent - 1 : -1}
+          currentAnalysis={loading ? liveProgress?.currentAnalysis || 'Analyzing...' : 'Complete'}
+          isAnalyzing={loading || false}
+        />
+      )}
 
       {loading && (
         <div className={styles.loadingOverlay}>
