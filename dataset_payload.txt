@@ -1,0 +1,55 @@
+{
+    "dataset": {
+        "name": "Test Multi-Conv Dataset",
+        "task": "Analyze customer support interactions",
+        "conversations": [
+            {
+                "initial_task": "Help user with login",
+                "turns": [
+                    {
+                        "user_message": "I cannot login",
+                        "agent_interactions": [
+                            {
+                                "agent_id": "support_agent",
+                                "agent_response": "Have you tried resetting your password?",
+                                "agent_steps": [
+                                    {"thought": "User has login issue, suggesting password reset."}
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "user_message": "Yes, I did.",
+                        "agent_interactions": [
+                            {
+                                "agent_id": "support_agent",
+                                "agent_response": "Okay, please check your spam folder.",
+                                "agent_steps": [
+                                    {"thought": "User tried reset, checking spam folder."}
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "initial_task": "Help user with billing",
+                "turns": [
+                    {
+                        "user_message": "My bill is wrong",
+                        "agent_interactions": [
+                            {
+                                "agent_id": "billing_agent",
+                                "agent_response": "Can you provide your invoice number?",
+                                "agent_steps": [
+                                    {"thought": "Billing issue, need invoice number."}
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    },
+    "analysis_types": ["conversation", "trajectory"]
+}

@@ -2,7 +2,7 @@
 
 # Original exports
 from .detector import ReAskDetector
-from .models import Message, EvalResult, DetectionType
+from .models import Message, EvalResult, DetectionType, Role
 
 # Agent evaluation exports
 from .agent_models import (
@@ -41,6 +41,7 @@ __version__ = "0.2.0"
 
 __all__ = [
     # Original
+    "Role",
     "ReAskDetector",
     "Message",
     "EvalResult", 

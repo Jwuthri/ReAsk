@@ -23,8 +23,17 @@ interface AnalysisOption {
 
 const ANALYSIS_OPTIONS: AnalysisOption[] = [
   {
+    id: 'full_all',
+    name: 'Full Analysis',
+    description: 'Run all evaluations (conversation + agent)',
+    icon: '🚀',
+    badge: 'RECOMMENDED',
+    category: 'all',
+    features: ['Conversation Detection', 'Trajectory Analysis', 'Tool Use Quality', 'Self-Correction'],
+  },
+  {
     id: 'conversation',
-    name: 'Conversation Analysis',
+    name: 'Conversation Detection',
     description: 'Detect bad responses via re-ask patterns',
     icon: '💬',
     category: 'conversation',
@@ -56,15 +65,6 @@ const ANALYSIS_OPTIONS: AnalysisOption[] = [
     badge: 'NEW',
     category: 'agent',
     features: ['Error Detection', 'Recovery Success', 'Loop Detection', 'Awareness Score'],
-  },
-  {
-    id: 'full_all',
-    name: 'Full Analysis',
-    description: 'Run all evaluations (conversation + agent)',
-    icon: '🚀',
-    badge: 'RECOMMENDED',
-    category: 'all',
-    features: ['CCM/RDM/Hallucination', 'Trajectory Analysis', 'Tool Quality', 'Self-Correction'],
   },
 ];
 
